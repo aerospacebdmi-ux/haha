@@ -1,0 +1,1325 @@
+#include <ACB_SmartCar_V2.h>
+#include <ultrasonic.h>
+#include <ESP32Servo.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DHT.h>
+
+#define LED1_PIN     2
+#define LED2_PIN     12
+#define DHT_PIN      33
+#define DHT_TYPE     DHT11
+#define SERVO_PIN    27
+#define LEFT_IR_PIN   35
+#define MID_IR_PIN    36
+#define RIGHT_IR_PIN  39
+
+ACB_SmartCar_V2 ACB_SmartCar;
+ultrasonic myUltrasonic;
+Servo myServo;
+DHT dht(DHT_PIN, DHT_TYPE);
+
+int Speed1 = 255;
+int right_distance = 0;
+int left_distance  = 0;
+int middle_distance = 0;
+
+volatile bool mode_state = false;
+volatile bool obstacleRunning = false;
+
+int Left_Tra_Value = 0;
+int Middle_Tra_Value = 0;
+int Right_Tra_Value = 0;
+int Black_Line = 2000;
+int lineSpeedStraight = 250;
+int lineSpeedCorrect  = 180;
+int lineRotateSpeed   = 220;
+
+volatile bool lineTrack_state = false;
+volatile bool lineTrackRunning = false;
+
+// ---- live state reported to the web page ----
+bool armed = true;          // safety interlock
+bool led1State = false;
+bool led2State = false;
+int  servoAngle = 90;
+
+unsigned long dhtLastRead = 0;
+const unsigned long DHT_INTERVAL_MS = 2500;
+float lastTemp = NAN;
+float lastHum  = NAN;
+
+// MQ2 gas sensor: SIMULATED, band-cycling pattern
+unsigned long gasStartTime = 0;
+bool gasReady = false;
+float lastPPM = 0;
+unsigned long lastPPMChange = 0;
+unsigned long ppmChangeInterval = 3000;
+int gasBandIndex = 0;
+int gasBandReadCount = 0;
+const int gasBandMin[] = {0, 101, 201, 301, 401, 501};
+const int gasBandMax[] = {100, 220, 300, 400, 500, 600};
+const int GAS_BAND_COUNT = 6;
+
+const char* ap_ssid = "ESP32_SmartCar";
+const char* ap_password = "12345678";
+
+WebServer server(80);
+
+// ================= HELPERS =================
+void setServo(int a){
+  servoAngle = constrain(a, 0, 180);
+  myServo.write(servoAngle);
+}
+
+// manual drive is only allowed when armed and no auto mode is running
+bool driveOK(){
+  return armed && !mode_state && !lineTrack_state;
+}
+
+void sendOK(){ server.send(200, "text/plain", "OK"); }
+void sendLocked(){ server.send(200, "text/plain", "LOCKED"); }
+
+// ================= MOTION HELPERS =================
+void back_clock(){
+    ACB_SmartCar.motorControl(1, -180);
+    ACB_SmartCar.motorControl(2, -180);
+    ACB_SmartCar.motorControl(3, -180);
+    ACB_SmartCar.motorControl(4, -180);
+    unsigned long t0 = millis();
+    while (millis() - t0 < 500) server.handleClient();
+    ACB_SmartCar.motorControl(1, 180);
+    ACB_SmartCar.motorControl(2, 180);
+    ACB_SmartCar.motorControl(3, -180);
+    ACB_SmartCar.motorControl(4, -180);
+    t0 = millis();
+    while (millis() - t0 < 1000) server.handleClient();
+}
+
+void back_anticlock(){
+    ACB_SmartCar.motorControl(1, -180);
+    ACB_SmartCar.motorControl(2, -180);
+    ACB_SmartCar.motorControl(3, -180);
+    ACB_SmartCar.motorControl(4, -180);
+    unsigned long t0 = millis();
+    while (millis() - t0 < 500) server.handleClient();
+    ACB_SmartCar.motorControl(1, -180);
+    ACB_SmartCar.motorControl(2, -180);
+    ACB_SmartCar.motorControl(3, 180);
+    ACB_SmartCar.motorControl(4, 180);
+    t0 = millis();
+    while (millis() - t0 < 1000) server.handleClient();
+}
+
+void ultrasonic_ranging(){
+    ACB_SmartCar.motorControl(1, 0);
+    ACB_SmartCar.motorControl(2, 0);
+    ACB_SmartCar.motorControl(3, 0);
+    ACB_SmartCar.motorControl(4, 0);
+    setServo(20);
+    delay(500);
+    right_distance = myUltrasonic.Ranging();
+    delay(200);
+    setServo(160);
+    delay(500);
+    left_distance = myUltrasonic.Ranging();
+    delay(200);
+    setServo(90);
+    delay(500);
+}
+
+void ObstacleAvoidance(){
+  obstacleRunning = true;
+  while (mode_state){
+    server.handleClient();
+    middle_distance = myUltrasonic.Ranging();
+    if (middle_distance <= 25){
+      ultrasonic_ranging();
+      if (left_distance < 20 && right_distance < 20){
+        back_anticlock();
+      } else {
+        if (right_distance > left_distance) back_clock();
+        else if (right_distance < left_distance) back_anticlock();
+        else back_clock();
+      }
+    } else {
+      ACB_SmartCar.motorControl(1, 180);
+      ACB_SmartCar.motorControl(2, 180);
+      ACB_SmartCar.motorControl(3, 180);
+      ACB_SmartCar.motorControl(4, 180);
+    }
+  }
+  ACB_SmartCar.Move(Stop, 0);
+  obstacleRunning = false;
+}
+
+void LineTracking(){
+  lineTrackRunning = true;
+  while (lineTrack_state){
+    server.handleClient();
+    Left_Tra_Value   = analogRead(LEFT_IR_PIN);
+    Middle_Tra_Value = analogRead(MID_IR_PIN);
+    Right_Tra_Value  = analogRead(RIGHT_IR_PIN);
+    delay(5);
+
+    if (Left_Tra_Value < Black_Line && Middle_Tra_Value >= Black_Line && Right_Tra_Value < Black_Line){
+      ACB_SmartCar.Move(Forward, lineSpeedStraight);
+    }
+    if (Left_Tra_Value < Black_Line && Middle_Tra_Value >= Black_Line && Right_Tra_Value >= Black_Line){
+      ACB_SmartCar.Move(Forward, lineSpeedCorrect);
+    }
+    if (Left_Tra_Value >= Black_Line && Middle_Tra_Value >= Black_Line && Right_Tra_Value < Black_Line){
+      ACB_SmartCar.Move(Forward, lineSpeedCorrect);
+    }
+    else if (Left_Tra_Value >= Black_Line && Middle_Tra_Value < Black_Line && Right_Tra_Value < Black_Line){
+      ACB_SmartCar.Move(Contrarotate, lineRotateSpeed);
+    }
+    else if (Left_Tra_Value < Black_Line && Middle_Tra_Value < Black_Line && Right_Tra_Value >= Black_Line){
+      ACB_SmartCar.Move(Clockwise, lineRotateSpeed);
+    }
+    else if (Left_Tra_Value >= Black_Line && Middle_Tra_Value >= Black_Line && Right_Tra_Value >= Black_Line){
+      ACB_SmartCar.Move(Forward, lineSpeedCorrect);
+    }
+  }
+  ACB_SmartCar.Move(Stop, 0);
+  lineTrackRunning = false;
+}
+
+// ================= SENSOR UPDATES =================
+void updateDHT(){
+  if (millis() - dhtLastRead >= DHT_INTERVAL_MS){
+    dhtLastRead = millis();
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+    if (!isnan(h) && !isnan(t)){ lastHum = h; lastTemp = t; }
+  }
+}
+
+void updateGas(){
+  unsigned long elapsed = millis() - gasStartTime;
+  if (!gasReady){
+    if (elapsed >= 15000){
+      gasReady = true;
+      gasBandIndex = 0;
+      gasBandReadCount = 0;
+      lastPPM = random(gasBandMin[gasBandIndex], gasBandMax[gasBandIndex] + 1);
+      ppmChangeInterval = random(3000, 4001);
+      lastPPMChange = millis();
+    }
+    return;
+  }
+  if (millis() - lastPPMChange >= ppmChangeInterval){
+    lastPPMChange = millis();
+    gasBandReadCount++;
+    if (gasBandReadCount >= 2){
+      gasBandReadCount = 0;
+      gasBandIndex = (gasBandIndex + 1) % GAS_BAND_COUNT;
+    }
+    lastPPM = random(gasBandMin[gasBandIndex], gasBandMax[gasBandIndex] + 1);
+    ppmChangeInterval = random(3000, 4001);
+  }
+}
+
+// ================= WEB PAGE =================
+// JS uses "var name = ..." style only (Arduino prototype generator safe). ASCII only.
+const char htmlPage[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ORION-1 - Rover Mission Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{--bg:#0b0e14;--s1:#10131a;--s2:#131822;--s3:#1c2230;--bd:#1e293b;--bd2:#2d3b53;--tx:#f0f6fc;--mu:#8b9bb4;--dm:#62728b;--cy:#00f0ff;--gr:#00fe66;--am:#ffb86f;--rd:#ff4d5e;--on:#002b30;--gl:rgba(0,240,255,.35);--cf:#00f0ff;--cb:#b26bff;--cl:#00fe66;--cr:#ffb86f;--cw:#ff5cf0;--tint:rgba(0,254,102,.12)}
+body[data-theme=tokyo]{--bg:#1a1b26;--s1:#1f2335;--s2:#24283b;--s3:#292e42;--bd:#414868;--bd2:#565f89;--tx:#c0caf5;--mu:#9aa5ce;--dm:#6675a3;--cy:#7dcfff;--gr:#9ece6a;--am:#e0af68;--rd:#f7768e;--on:#15161e;--gl:rgba(125,207,255,.3);--cf:#7dcfff;--cb:#bb9af7;--cl:#9ece6a;--cr:#ff9e64;--cw:#ff79c6}
+body[data-theme=light]{--bg:#f3f3f3;--s1:#fff;--s2:#fff;--s3:#f0f2f5;--bd:#d1d5da;--bd2:#b8bfc7;--tx:#24292e;--mu:#57606a;--dm:#8c959f;--cy:#005fb8;--gr:#1a7f37;--am:#b08800;--rd:#c8321e;--on:#fff;--gl:rgba(0,95,184,.22);--cf:#005fb8;--cb:#7a3fc9;--cl:#1a7f37;--cr:#b35c00;--cw:#c2185b;--tint:rgba(26,127,55,.12)}
+body[data-alert="1"]{--tint:rgba(255,77,94,.24)}
+*{box-sizing:border-box;min-width:0}
+html,body{margin:0;padding:0}
+body{min-height:100vh;color:var(--tx);background:var(--bg);font:13px 'JetBrains Mono',ui-monospace,Consolas,monospace;overflow-x:hidden;transition:background .3s,color .3s;background-image:linear-gradient(var(--bd) 1px,transparent 1px),linear-gradient(90deg,var(--bd) 1px,transparent 1px);background-size:48px 48px;padding:0 10px 30px}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(circle at 50% 0,transparent,var(--bg) 85%)}
+#space-bg{position:fixed;inset:0;z-index:-2;overflow:hidden;pointer-events:none}
+.star{position:absolute;background:#fff;border-radius:50%;animation:tw 3s infinite ease-in-out}
+body[data-theme=light] .star{background:#8c959f}
+@keyframes tw{0%,100%{opacity:.1}50%{opacity:.8}}
+.orb{position:absolute;top:-40px;border-radius:50%;animation:drift 55s linear infinite;opacity:.85}
+.moon{width:80px;height:80px;left:-12%;background:radial-gradient(circle at 35% 35%,#fdfdfd,#cfd6e6 55%,#8993ad);box-shadow:0 0 45px rgba(255,255,255,.25)}
+.sunorb{width:110px;height:110px;left:-12%;top:5%;animation-duration:70s;animation-delay:-25s;background:radial-gradient(circle at 40% 40%,#fff3c9,#ffb347 55%,#d3670f);box-shadow:0 0 60px rgba(255,179,71,.4)}
+@keyframes drift{0%{left:-12%}100%{left:112%}}
+.wrap{max-width:1240px;margin:0 auto}
+
+.top{position:sticky;top:0;z-index:20;margin:0 -10px;padding:8px 10px;background:var(--s1);border-bottom:1px solid var(--bd);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.tg{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:4px;white-space:nowrap;border:1px solid var(--bd2);background:var(--s3);font-size:10px;letter-spacing:1.2px;text-transform:uppercase;font-weight:700;color:var(--mu)}
+.chip b{color:var(--cy)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--gr);box-shadow:0 0 6px var(--gr);animation:pd 1.4s infinite}
+.dot.red{background:var(--rd);box-shadow:0 0 6px var(--rd)}
+@keyframes pd{0%,100%{opacity:1}50%{opacity:.3}}
+.term{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:5px;border:1px solid var(--bd2);background:var(--s3)}
+.tico{display:flex;align-items:center;gap:3px;padding:2px 5px;background:#10131a;border:1px solid #2b3345;border-radius:4px;font-size:9px;color:#00f0ff;font-weight:700}
+.tico i{width:6px;height:6px;border-radius:50%;display:block}
+select{appearance:none;-webkit-appearance:none;background:var(--s3);color:var(--tx);border:1px solid var(--bd2);border-radius:4px;padding:5px 22px 5px 8px;font:700 10px 'JetBrains Mono',monospace;letter-spacing:1px;text-transform:uppercase;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,var(--mu) 50%),linear-gradient(135deg,var(--mu) 50%,transparent 50%);background-position:calc(100% - 13px) 55%,calc(100% - 8px) 55%;background-size:5px 5px;background-repeat:no-repeat}
+.sun{width:34px;height:34px;border-radius:50%;cursor:pointer;flex:none;border:1px solid var(--cy);box-shadow:0 0 12px var(--gl);background:radial-gradient(circle at 35% 35%,#fff3c9,#ffb347 55%,#d3670f);transition:transform .2s}
+.sun:active{transform:scale(.88)}
+body[data-theme=light] .sun{background:radial-gradient(circle at 65% 35%,#fdfdfd,#cfd6e6 55%,#8993ad)}
+
+header{text-align:center;margin:16px 0 14px}
+h1{font:900 clamp(24px,5vw,44px) Inter,system-ui,sans-serif;margin:4px 0;letter-spacing:clamp(2px,.8vw,5px);color:var(--cy);text-shadow:0 0 18px var(--gl)}
+.subtitle{font-size:clamp(9px,1.5vw,13px);letter-spacing:clamp(2px,.6vw,4px);text-transform:uppercase;font-weight:700}
+.tagline{color:var(--mu);font-size:clamp(10px,1.5vw,13px);margin-top:6px;letter-spacing:1px}
+
+.grid{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:700px){.grid{grid-template-columns:repeat(2,1fr)}.w{grid-column:1/-1}}
+@media(min-width:1100px){.grid{grid-template-columns:repeat(12,1fr)}.w{grid-column:auto}.c7{grid-column:span 7}.c5{grid-column:span 5}.c4{grid-column:span 4}.c8{grid-column:span 8}}
+.panel{background:var(--s2);border:1px solid var(--bd);border-radius:10px;padding:14px;box-shadow:0 8px 24px rgba(0,0,0,.22);overflow:hidden}
+.panel h2{margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--bd);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--cy);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.sub{font-size:9px;letter-spacing:.8px;color:var(--dm);text-transform:none;font-weight:400}
+.lbl{font-size:9px;letter-spacing:1.4px;color:var(--dm);text-transform:uppercase}
+.box{background:var(--s3);border:1px solid var(--bd);border-radius:8px;padding:10px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.big{font-size:22px;font-weight:700;color:var(--am)}
+.bar{height:8px;border-radius:6px;background:var(--bd2);overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;width:0;background:var(--cy);transition:width .8s,background .3s}
+.note{margin-top:10px;font-size:11px;color:var(--mu);line-height:1.5;padding:8px 10px;border-left:3px solid var(--cy);background:var(--s3);border-radius:0 6px 6px 0}
+
+/* mode + throttle */
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;background:var(--bg);border:1px solid var(--bd);padding:5px;border-radius:8px}
+@media(max-width:520px){.seg{grid-template-columns:1fr}}
+.mb{padding:12px 8px;border-radius:5px;border:0;cursor:pointer;background:var(--s3);color:var(--mu);font:700 10px 'JetBrains Mono',monospace;letter-spacing:1.2px;text-transform:uppercase;transition:.2s}
+.mb.on{background:var(--cy);color:var(--on);box-shadow:0 0 14px var(--gl)}
+.thr{display:flex;flex-wrap:wrap;background:var(--s3);border:1px solid var(--bd);border-radius:6px;padding:2px}
+.thr button{padding:7px 10px;border:0;border-radius:4px;background:transparent;color:var(--mu);font:700 10px 'JetBrains Mono',monospace;cursor:pointer}
+.thr button.on{background:var(--cy);color:var(--on)}
+.sw{position:relative;width:46px;height:24px;flex:none}
+.sw input{opacity:0;width:0;height:0}
+.sl{position:absolute;inset:0;cursor:pointer;background:var(--s3);border-radius:30px;border:1px solid var(--bd2);transition:.3s}
+.sl::before{content:"";position:absolute;height:16px;width:16px;left:3px;bottom:3px;background:var(--dm);border-radius:50%;transition:.3s}
+.sw input:checked+.sl{background:rgba(0,254,102,.15);border-color:var(--gr)}
+.sw input:checked+.sl::before{transform:translateX(22px);background:var(--gr)}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stats b{font-size:20px;color:var(--cy)}
+
+/* camera */
+.cam{position:relative;width:100%;min-height:200px;border-radius:8px;overflow:hidden;background:#05070b;border:1px solid var(--bd);display:flex;align-items:center;justify-content:center}
+.cam img{width:100%;height:auto;display:block}
+.cam::after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle,transparent 55%,rgba(5,7,11,.7))}
+.hud{position:absolute;z-index:2;pointer-events:none}
+.hud .chip{background:rgba(0,0,0,.65);padding:3px 7px}
+.tl{top:8px;left:8px;display:flex;gap:5px;flex-wrap:wrap}.tr{top:8px;right:8px}.bl{bottom:8px;left:8px}.br{bottom:8px;right:8px;text-align:right}
+.cs.live{color:var(--gr)}.cs.err{color:var(--rd)}
+#camAlert{color:var(--gr);border-color:var(--gr)}
+body[data-alert="1"] #camAlert{color:var(--rd);border-color:var(--rd);animation:blink .5s infinite alternate}
+.ret{position:absolute;z-index:2;left:50%;top:50%;width:clamp(70px,20%,120px);aspect-ratio:1;transform:translate(-50%,-50%);pointer-events:none}
+.cn{position:absolute;width:16px;height:16px;border:2px solid var(--cy);opacity:.7;z-index:2;pointer-events:none}
+.cn.a{top:6px;left:6px;border-right:0;border-bottom:0}.cn.b{top:6px;right:6px;border-left:0;border-bottom:0}.cn.c{bottom:6px;left:6px;border-right:0;border-top:0}.cn.d{bottom:6px;right:6px;border-left:0;border-top:0}
+.ph{position:absolute;z-index:1;font-size:11px;letter-spacing:2px;color:var(--dm);text-transform:uppercase;text-align:center}
+.hv{font-size:clamp(14px,3vw,18px);font-weight:700;color:var(--gr);text-shadow:0 0 8px var(--gl)}
+body[data-alert="1"] .hv{color:var(--rd)}
+
+/* gauges */
+.gauges{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.gb{background:var(--s3);border:1px solid var(--bd);border-radius:8px;padding:8px;text-align:center}
+.ring{position:relative;width:min(104px,100%);aspect-ratio:1;margin:4px auto}
+.ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.num b{font-size:clamp(15px,4vw,20px)}.num span{font-size:9px;color:var(--dm)}
+.track{fill:none;stroke:var(--bd2);stroke-width:8;opacity:.5}
+.arc{fill:none;stroke-width:8;stroke-linecap:round;stroke-dasharray:251.2;stroke-dashoffset:251.2;transition:stroke-dashoffset 1s}
+#obsState{color:var(--gr);border-color:var(--gr)}
+body[data-alert="1"] #obsState{color:var(--rd);border-color:var(--rd)}
+
+/* radar */
+.radar{position:relative;background:radial-gradient(ellipse at 50% 100%,var(--tint),transparent 70%),var(--bg);border:1px solid var(--bd2);border-radius:10px;overflow:hidden;--beam:var(--gr);transition:border-color .3s,box-shadow .3s}
+body[data-alert="1"] .radar{--beam:var(--rd);border-color:var(--rd);box-shadow:0 0 26px rgba(255,77,94,.45),inset 0 0 40px rgba(255,77,94,.15)}
+.radar svg{width:100%;height:auto;display:block}
+.rr{fill:none;stroke:var(--bd2);stroke-width:1}
+.rl{fill:var(--dm);font:8px 'JetBrains Mono',monospace}
+.dz{fill:rgba(255,77,94,.15);stroke:var(--rd);stroke-dasharray:3 3;stroke-width:1}
+.beam{transform-origin:200px 205px;transform-box:view-box;transition:transform .35s ease-out}
+.bl{stroke:var(--beam);stroke-width:3;stroke-linecap:round;filter:drop-shadow(0 0 5px var(--beam))}
+.wedge{fill:var(--beam);opacity:.2}
+.blip{fill:var(--beam);filter:drop-shadow(0 0 6px var(--beam))}
+.rbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+.rstate{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:6px;border:1px solid var(--gr);color:var(--gr);font-weight:700;letter-spacing:2px;font-size:12px;text-transform:uppercase;background:rgba(0,254,102,.08)}
+.rstate i{width:9px;height:9px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}
+body[data-alert="1"] .rstate{border-color:var(--rd);color:var(--rd);background:rgba(255,77,94,.12);animation:blink .5s infinite alternate}
+@keyframes blink{from{opacity:1}to{opacity:.5}}
+.rdist{font-size:28px;font-weight:900;color:var(--gr)}
+body[data-alert="1"] .rdist{color:var(--rd)}
+input[type=range]{width:100%;-webkit-appearance:none;height:6px;border-radius:4px;background:var(--bd2);outline:none;margin:12px 0}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:var(--cy);box-shadow:0 0 10px var(--cy);cursor:pointer;border:2px solid var(--s1)}
+input[type=range]:disabled{opacity:.35}
+.snap{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.snap button{padding:10px 2px;border-radius:4px;border:1px solid var(--bd2);background:var(--s3);color:var(--mu);font:700 10px 'JetBrains Mono',monospace;cursor:pointer}
+.snap button:active{background:var(--cy);color:var(--on)}
+.snap button:disabled{opacity:.35;cursor:not-allowed}
+.chk{display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:1px;color:var(--mu);text-transform:uppercase;cursor:pointer}
+.chk input{accent-color:var(--cy);width:16px;height:16px}
+
+/* LEDs */
+.trow{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;text-align:center;justify-items:center}
+.pill{position:relative;width:74px;height:38px;border-radius:20px;cursor:pointer;background:var(--s3);border:1px solid var(--bd2);transition:.3s;margin:0 auto 8px}
+.knob{position:absolute;top:3px;left:3px;width:30px;height:30px;border-radius:50%;background:var(--s1);border:1px solid var(--bd2);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:var(--dm);transition:.3s}
+.pill.on{background:rgba(0,240,255,.12);border-color:var(--cy);box-shadow:0 0 12px var(--gl)}
+.pill.on .knob{transform:translateX(36px);border-color:var(--cy);color:var(--cy)}
+
+/* gaming drive pad */
+.pad{position:relative}
+.dpad{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:340px;margin:12px auto 0}
+.dbtn{--c:var(--cy);position:relative;aspect-ratio:1;border-radius:18px;border:2px solid var(--c);background:linear-gradient(160deg,var(--s3),var(--s1));color:var(--c);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font:700 10px 'JetBrains Mono',monospace;letter-spacing:1.5px;box-shadow:0 0 18px -6px var(--c),inset 0 0 14px -8px var(--c),0 4px 0 rgba(0,0,0,.35);overflow:hidden;transition:transform .08s,box-shadow .15s,filter .2s,opacity .2s;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+.dbtn::before{content:"";position:absolute;inset:0;background:var(--c);opacity:.07;transition:opacity .15s}
+.dbtn::after{content:"";position:absolute;left:-60%;top:0;width:40%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.18),transparent);transform:skewX(-20deg);animation:shine 4s infinite}
+@keyframes shine{0%,70%{left:-60%}100%{left:130%}}
+.dbtn svg{width:clamp(22px,38%,38px);height:auto;fill:currentColor;position:relative;z-index:1;filter:drop-shadow(0 0 6px var(--c))}
+.dbtn span{position:relative;z-index:1}
+.dbtn:hover{box-shadow:0 0 24px -2px var(--c),inset 0 0 18px -6px var(--c),0 4px 0 rgba(0,0,0,.35)}
+.dbtn:active,.dbtn.on{transform:translateY(4px) scale(.96);box-shadow:0 0 30px 2px var(--c),inset 0 0 22px -2px var(--c);color:#fff}
+.dbtn:active::before,.dbtn.on::before{opacity:.4}
+.dbtn[data-d=forward]{--c:var(--cf)}
+.dbtn[data-d=backward]{--c:var(--cb)}
+.dbtn[data-d=left]{--c:var(--cl)}
+.dbtn[data-d=right]{--c:var(--cr)}
+.dbtn[data-d=contrarotate],.dbtn[data-d=clockwise]{--c:var(--cw)}
+#b-backward svg{transform:rotate(180deg)}
+#b-left svg{transform:rotate(-90deg)}
+#b-right svg{transform:rotate(90deg)}
+#b-contrarotate svg{transform:scaleX(-1)}
+.dbtn.stop{--c:var(--rd);border-radius:50%;background:repeating-linear-gradient(45deg,#5a1119,#5a1119 8px,#4a0d14 8px,#4a0d14 16px);color:#ffd0d0;font-size:13px;letter-spacing:2px;animation:pulsered 1.6s infinite}
+.dbtn.stop::after{display:none}
+@keyframes pulsered{0%,100%{box-shadow:0 0 18px -4px var(--rd)}50%{box-shadow:0 0 32px 2px var(--rd)}}
+.dbtn.stop:active{background:var(--rd);color:#fff}
+.tile{aspect-ratio:1;border:1px dashed var(--bd2);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:var(--s3);text-align:center}
+.tile b{font-size:clamp(11px,3vw,16px);color:var(--cy)}
+.pad.locked .dbtn:not(.stop){opacity:.3;filter:grayscale(1);pointer-events:none}
+.spd{height:8px;border-radius:6px;background:var(--bd2);overflow:hidden;margin-top:12px;max-width:340px;margin-left:auto;margin-right:auto}
+.spd i{display:block;height:100%;width:100%;background:linear-gradient(90deg,var(--cl),var(--cy),var(--cr));transition:width .3s}
+
+.abtn{width:100%;padding:16px;border-radius:8px;cursor:pointer;border:1px solid var(--cy);background:transparent;color:var(--cy);font:700 13px 'JetBrains Mono',monospace;letter-spacing:2px;text-transform:uppercase;box-shadow:0 0 14px var(--gl)}
+.abtn:active{transform:translateY(2px)}
+.popup{position:fixed;top:70px;left:50%;z-index:999;width:min(92vw,380px);background:var(--s1);border-radius:10px;padding:16px 20px;text-align:center;opacity:0;pointer-events:none;transform:translateX(-50%) translateY(-24px);transition:opacity .35s,transform .35s;box-shadow:0 12px 34px rgba(0,0,0,.5)}
+.popup.show{opacity:1;transform:translateX(-50%);pointer-events:auto}
+.popup.safe{border:2px solid var(--gr)}.popup.danger{border:2px solid var(--rd)}
+.at{font-size:12px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;font-weight:700}
+.popup.safe .at{color:var(--gr)}.popup.danger .at{color:var(--rd)}
+.am{font-size:12px;line-height:1.6}
+footer{margin-top:20px;text-align:center;color:var(--dm);font-size:10px;letter-spacing:2px}
+</style>
+</head>
+<body data-theme="spacex" data-alert="0">
+<div id="space-bg"></div>
+<div id="analyzePopup" class="popup"></div>
+
+<div class="top">
+  <div class="tg">
+    <span class="chip"><span class="dot"></span><b>CORE-SYS</b></span>
+    <span class="chip">ROVER-ESP32 // <b>TACTICAL GROUND UNIT</b></span>
+  </div>
+  <div class="tg">
+    <span class="chip"><span class="dot" id="linkDot"></span><span id="linkTxt">LINK ACTIVE</span></span>
+    <span class="chip"><b id="istClock">--:--:--</b> IST</span>
+    <span class="chip">MET <b id="metVal">00:00:00</b></span>
+    <div class="term">
+      <span class="tico"><i style="background:#ff5f56"></i><i style="background:#ffbd2e"></i><i style="background:#27c93f"></i>&gt;_</span>
+      <select id="themeSel" onchange="setTheme(this.value)">
+        <option value="spacex">SpaceX / Dark</option>
+        <option value="tokyo">Tokyo Night</option>
+        <option value="light">VS Code Light</option>
+      </select>
+    </div>
+    <div class="sun" onclick="toggleTheme()"></div>
+  </div>
+</div>
+
+<div class="wrap">
+<header>
+  <h1>ORION-1 ROVER</h1>
+  <div class="subtitle">Space Robotics Program - Mission Control</div>
+  <div class="tagline">Autonomous ground exploration unit - live telemetry and command console</div>
+</header>
+
+<div class="grid">
+
+  <div class="panel w c8">
+    <h2>Nav-Guidance Directory <span class="sub">ESP-V2 // synced with rover</span></h2>
+    <div class="row" style="margin-bottom:10px">
+      <span class="lbl">Safety interlock</span>
+      <span class="row"><label class="sw"><input type="checkbox" id="safe" checked onchange="interlock()"><span class="sl"></span></label><span class="chip"><b id="safeTxt">ONLINE</b></span></span>
+    </div>
+    <div class="seg">
+      <button class="mb on" id="m-manual" onclick="setMode('manual')">Manual Override</button>
+      <button class="mb" id="m-auto" onclick="setMode('auto')">Auto-Nav: Sweep</button>
+      <button class="mb" id="m-line" onclick="setMode('line')">Autonomous Line</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <span class="row"><span class="lbl">Throttle ceiling</span>
+        <span class="thr" id="thr"><button data-v="25" onclick="setThrottle(25)">25%</button><button data-v="50" onclick="setThrottle(50)">50%</button><button data-v="75" onclick="setThrottle(75)">75%</button><button data-v="100" class="on" onclick="setThrottle(100)">100% BOOST</button></span></span>
+      <span class="lbl">Motor PWM: <b style="color:var(--cy)" id="pwm">100% (255/255)</b></span>
+    </div>
+    <div class="note" id="deckMsg">Manual drive active.</div>
+  </div>
+
+  <div class="panel w c4">
+    <h2>Hardware Realtime Bus <span class="sub">live stream</span></h2>
+    <div class="stats">
+      <div class="box"><div class="lbl">Round-trip ping</div><b id="pingVal">--</b> <span class="lbl">ms</span></div>
+      <div class="box"><div class="lbl">Mode</div><b id="hudModeB" style="font-size:14px">MANUAL</b></div>
+      <div class="box"><div class="lbl">Throttle</div><b id="thrB">100</b> <span class="lbl">%</span></div>
+      <div class="box"><div class="lbl">Servo</div><b id="servoB">90</b> <span class="lbl">deg</span></div>
+    </div>
+  </div>
+
+  <div class="panel w c7">
+    <h2>Live Camera Feed <span class="sub">ESP32-CAM // ws 192.168.4.50</span></h2>
+    <div class="cam">
+      <span class="cn a"></span><span class="cn b"></span><span class="cn c"></span><span class="cn d"></span>
+      <svg class="ret" viewBox="0 0 200 200"><circle cx="100" cy="100" r="70" fill="none" stroke="var(--cy)" stroke-opacity=".3" stroke-dasharray="4 6"/><path d="M88 100H68M112 100H132M100 88V68M100 112V132" stroke="var(--cy)" stroke-width="2" fill="none"/><circle cx="100" cy="100" r="3" fill="var(--cy)"/></svg>
+      <div class="hud tl"><span class="chip cs" id="camStatus">Connecting</span><span class="chip">CAM-01</span><span class="chip" id="camAlert">CLEAR</span></div>
+      <div class="hud tr"><span class="chip">SERVO <b id="hudServo">90</b> deg</span></div>
+      <div class="hud bl"><span class="chip">MODE <b id="hudMode">MANUAL</b></span></div>
+      <div class="hud br"><div class="lbl">Target range</div><div class="hv"><span id="hudDist">--</span> cm</div></div>
+      <img id="camStream" src="" alt="">
+      <div class="ph" id="camPlaceholder">Waiting for camera link</div>
+    </div>
+  </div>
+
+  <div class="panel w c5">
+    <h2>Telemetry <span class="sub">Sensor bus // 1 Hz</span></h2>
+    <div class="gauges">
+      <div class="gb"><div class="lbl">Core Environment</div>
+        <div class="ring"><svg viewBox="0 0 100 100"><circle class="track" cx="50" cy="50" r="40"/><circle class="arc" id="tempArc" cx="50" cy="50" r="40" stroke="var(--cy)"/></svg><div class="num"><b id="temp">--</b><span>deg C</span></div></div>
+        <div class="lbl">Temp</div></div>
+      <div class="gb"><div class="lbl">Relative Humidity</div>
+        <div class="ring"><svg viewBox="0 0 100 100"><circle class="track" cx="50" cy="50" r="40"/><circle class="arc" id="humArc" cx="50" cy="50" r="40" stroke="var(--gr)"/></svg><div class="num"><b id="hum">--</b><span>% RH</span></div></div>
+        <div class="lbl">Humidity</div></div>
+    </div>
+    <div class="box" style="margin-top:10px">
+      <div class="row"><span class="lbl">Gas Hazard Monitor // MQ2</span><span class="lbl">Limit 400 ppm</span></div>
+      <div class="row"><span class="big"><span id="gasValue">--</span> <span class="lbl" id="gasUnit">ppm</span></span><span class="lbl" id="gasState">CALIBRATING</span></div>
+      <div class="bar"><i id="gasBar"></i></div>
+    </div>
+    <div class="box row" style="margin-top:10px">
+      <div><div class="lbl">Proximity Echo</div><span class="big"><span id="dist">--</span> <span class="lbl">cm</span></span></div>
+      <span class="chip" id="obsState">CLEAR</span>
+    </div>
+  </div>
+
+  <div class="panel w c8">
+    <h2>Lidar / Ultrasonic Radar Sweep <span class="sub">Range 100 cm // danger under 10 cm</span></h2>
+    <div class="radar" id="radar">
+      <svg viewBox="0 0 400 225">
+        <path class="rr" d="M10 205A190 190 0 0 1 390 205"/>
+        <path class="rr" d="M57.5 205A142.5 142.5 0 0 1 342.5 205"/>
+        <path class="rr" d="M105 205A95 95 0 0 1 295 205"/>
+        <path class="rr" d="M152.5 205A47.5 47.5 0 0 1 247.5 205"/>
+        <path class="dz" d="M181 205A19 19 0 0 1 219 205Z"/>
+        <line class="rr" x1="10" y1="205" x2="390" y2="205"/>
+        <line class="rr" x1="200" y1="205" x2="390" y2="205"/>
+        <line class="rr" x1="200" y1="205" x2="364.5" y2="110"/>
+        <line class="rr" x1="200" y1="205" x2="295" y2="40.4"/>
+        <line class="rr" x1="200" y1="205" x2="200" y2="15"/>
+        <line class="rr" x1="200" y1="205" x2="105" y2="40.4"/>
+        <line class="rr" x1="200" y1="205" x2="35.5" y2="110"/>
+        <text class="rl" x="203" y="162">25</text><text class="rl" x="203" y="115">50</text><text class="rl" x="203" y="68">75</text><text class="rl" x="203" y="22">100 cm</text>
+        <text class="rl" x="366" y="220">0 R</text><text class="rl" x="8" y="220">180 L</text>
+        <g id="trail"></g>
+        <g class="beam" id="beam">
+          <path class="wedge" d="M200 205L180.1 16.1A190 190 0 0 1 219.9 16.1Z"/>
+          <line class="bl" x1="200" y1="205" x2="200" y2="15"/>
+        </g>
+        <circle class="blip" id="blip" cx="200" cy="205" r="0"/>
+        <circle cx="200" cy="205" r="6" fill="var(--cy)"/>
+      </svg>
+    </div>
+    <div class="rbar">
+      <span class="rstate"><i></i><span id="radState">SAFE</span></span>
+      <span class="rdist"><span id="rdDist">--</span> <span class="lbl">cm</span></span>
+    </div>
+    <div class="row" style="margin-top:10px"><span class="lbl">Ultrasonic servo angle: <b style="color:var(--cy)" id="servoVal">90 deg</b></span>
+      <label class="chk"><input type="checkbox" id="autoSweep" onchange="sweepToggle()">Continuous auto-sweep</label></div>
+    <input type="range" min="0" max="180" value="90" id="servoSlider" oninput="servoMoved(this.value)">
+    <div class="snap" id="snap"><button onclick="snapServo(0)">0 R</button><button onclick="snapServo(45)">45</button><button onclick="snapServo(90)">90 FWD</button><button onclick="snapServo(135)">135</button><button onclick="snapServo(180)">180 L</button></div>
+    <div class="note" id="servoNote">Manual servo control.</div>
+  </div>
+
+  <div class="panel hf c4">
+    <h2>Auxiliary Lights <span class="sub">LED 1 / LED 2</span></h2>
+    <div class="trow">
+      <div><div class="pill" id="led1Pill" onclick="toggleLed(1)"><div class="knob">LED</div></div><div class="lbl">LED 1</div></div>
+      <div><div class="pill" id="led2Pill" onclick="toggleLed(2)"><div class="knob">LED</div></div><div class="lbl">LED 2</div></div>
+    </div>
+    <div class="row" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bd)">
+      <span class="lbl">Vande Mataram</span>
+      <label class="sw"><input type="checkbox" id="vandeSwitch" onchange="toggleVande()"><span class="sl"></span></label>
+    </div>
+  </div>
+
+  <div class="panel hf c5">
+    <h2>Mission Analysis</h2>
+    <div class="lbl" style="margin-bottom:12px;line-height:1.6">Evaluates temperature, humidity and gas readings to judge atmosphere safety and water presence.</div>
+    <button class="abtn" onclick="analyze()">ANALYZE ATMOSPHERE</button>
+  </div>
+
+  <div class="panel w c7">
+    <h2>Omnidirectional Vector Pad <span class="sub">WASD / arrows // Q E rotate // Space stop</span></h2>
+    <div class="pad" id="pad">
+      <div class="row"><span class="chip" id="padMsg">MANUAL READY</span><span class="chip">VECTOR <b id="vec">IDLE</b></span></div>
+      <div class="dpad">
+        <button class="dbtn" id="b-contrarotate" data-d="contrarotate"><svg viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.1-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M20 3v6h-6z"/></svg><span>CCW</span></button>
+        <button class="dbtn" id="b-forward" data-d="forward"><svg viewBox="0 0 24 24"><path d="M12 3l8 9h-5v9H9v-9H4z"/></svg><span>FWD</span></button>
+        <button class="dbtn" id="b-clockwise" data-d="clockwise"><svg viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.1-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M20 3v6h-6z"/></svg><span>CW</span></button>
+        <button class="dbtn" id="b-left" data-d="left"><svg viewBox="0 0 24 24"><path d="M12 3l8 9h-5v9H9v-9H4z"/></svg><span>LEFT</span></button>
+        <button class="dbtn stop" id="b-stop" onclick="stopEverything()"><span>STOP</span></button>
+        <button class="dbtn" id="b-right" data-d="right"><svg viewBox="0 0 24 24"><path d="M12 3l8 9h-5v9H9v-9H4z"/></svg><span>RIGHT</span></button>
+        <div class="tile"><div class="lbl">Speed</div><b id="spdT">100%</b></div>
+        <button class="dbtn" id="b-backward" data-d="backward"><svg viewBox="0 0 24 24"><path d="M12 3l8 9h-5v9H9v-9H4z"/></svg><span>BACK</span></button>
+        <div class="tile"><div class="lbl">Keys</div><b>WASD QE</b></div>
+      </div>
+      <div class="spd"><i id="spdBar"></i></div>
+    </div>
+  </div>
+
+</div>
+<footer>ESP32 ROVER - TELEMETRY LINK ACTIVE</footer>
+</div>
+
+<script>
+var $ = function(id){ return document.getElementById(id); };
+
+/* ---- starfield + drifting moon/sun ---- */
+var bg = $('space-bg');
+var i = 0;
+while (i < 60){
+  var s = document.createElement('div');
+  s.className = 'star';
+  var size = Math.random() * 2 + 1;
+  s.style.width = size + 'px';
+  s.style.height = size + 'px';
+  s.style.left = (Math.random() * 100) + '%';
+  s.style.top = (Math.random() * 100) + '%';
+  s.style.animationDelay = (Math.random() * 3) + 's';
+  bg.appendChild(s);
+  i++;
+}
+var moonOrb = document.createElement('div');
+moonOrb.className = 'orb moon';
+moonOrb.style.top = (Math.random() * 20 + 3) + '%';
+bg.appendChild(moonOrb);
+var sunOrb = document.createElement('div');
+sunOrb.className = 'orb sunorb';
+bg.appendChild(sunOrb);
+
+/* ---- clocks ---- */
+var t0 = Date.now();
+var pad2 = function(n){ return (n < 10 ? '0' : '') + n; };
+setInterval(function(){
+  var ist = '--:--:--';
+  try{ ist = new Date().toLocaleTimeString('en-IN', {timeZone:'Asia/Kolkata', hour12:false}); }catch(e){}
+  $('istClock').innerText = ist;
+  var sec = Math.floor((Date.now() - t0) / 1000);
+  $('metVal').innerText = pad2(Math.floor(sec/3600)) + ':' + pad2(Math.floor(sec/60)%60) + ':' + pad2(sec%60);
+}, 1000);
+
+/* ---- theme ---- */
+var setTheme = function(v){
+  document.body.setAttribute('data-theme', v);
+  $('themeSel').value = v;
+  try{ localStorage.setItem('rover-theme', v); }catch(e){}
+};
+var toggleTheme = function(){
+  setTheme(document.body.getAttribute('data-theme') === 'light' ? 'spacex' : 'light');
+};
+try{ var st = localStorage.getItem('rover-theme'); if (st) setTheme(st); }catch(e){}
+
+/* ---- shared state (always overwritten by the rover's real state) ---- */
+var state = {mode:'manual', armed:true};
+var holdUntil = 0;
+var hold = function(){ holdUntil = Date.now() + 1500; };
+var cmd = function(c){ fetch('/' + c).catch(function(){}); };
+var MODE_LABEL = {manual:'MANUAL', auto:'AUTO-NAV', line:'LINE'};
+var MODE_NOTE = {
+  manual:'Manual drive active - use the pad or keyboard (WASD / QE / Space).',
+  auto:'Auto-Nav running - rover drives forward and steers around obstacles under 25 cm. Press STOP to release.',
+  line:'Line follow running - IR sensors are steering the rover. Press STOP to release.'
+};
+var moving = null;
+
+var clearMoving = function(){
+  if (moving){
+    var el = $('b-' + moving);
+    if (el) el.classList.remove('on');
+    moving = null;
+    $('vec').innerText = 'IDLE';
+  }
+};
+
+/* ---- render helpers ---- */
+var applyLock = function(){
+  var locked = !state.armed || state.mode !== 'manual';
+  $('pad').className = locked ? 'pad locked' : 'pad';
+  if (locked) clearMoving();
+  if (!state.armed){
+    $('padMsg').innerText = 'LOCKED - INTERLOCK DISARMED';
+    $('deckMsg').innerText = 'Interlock disarmed - all drive commands are blocked. Arm the interlock to drive.';
+  } else if (state.mode !== 'manual'){
+    $('padMsg').innerText = 'LOCKED - ' + MODE_LABEL[state.mode] + ' RUNNING';
+    $('deckMsg').innerText = MODE_NOTE[state.mode];
+  } else {
+    $('padMsg').innerText = 'MANUAL READY';
+    $('deckMsg').innerText = MODE_NOTE.manual;
+  }
+};
+
+var renderServoLock = function(){
+  var lock = state.mode === 'auto';
+  $('servoSlider').disabled = lock;
+  var bs = $('snap').getElementsByTagName('button');
+  var k = 0;
+  while (k < bs.length){ bs[k].disabled = lock; k++; }
+  $('autoSweep').disabled = lock;
+  if (lock && $('autoSweep').checked){ $('autoSweep').checked = false; sweepToggle(); }
+  $('servoNote').innerText = lock ? 'Servo is under Auto-Nav control - manual servo locked.' : 'Manual servo control.';
+};
+
+var renderMode = function(){
+  var names = ['manual','auto','line'];
+  var k = 0;
+  while (k < 3){ $('m-' + names[k]).className = 'mb' + (names[k] === state.mode ? ' on' : ''); k++; }
+  $('hudMode').innerText = MODE_LABEL[state.mode];
+  $('hudModeB').innerText = MODE_LABEL[state.mode];
+  applyLock();
+  renderServoLock();
+};
+
+var renderArm = function(){
+  $('safe').checked = state.armed;
+  $('safeTxt').innerText = state.armed ? 'ONLINE' : 'DISARMED';
+  $('safeTxt').style.color = state.armed ? 'var(--gr)' : 'var(--rd)';
+  applyLock();
+};
+
+var ledState = {1:false, 2:false};
+var renderLeds = function(){
+  $('led1Pill').className = ledState[1] ? 'pill on' : 'pill';
+  $('led2Pill').className = ledState[2] ? 'pill on' : 'pill';
+};
+
+var curThrottle = 100;
+var renderThrottle = function(v){
+  curThrottle = v;
+  var bs = $('thr').getElementsByTagName('button');
+  var k = 0;
+  while (k < bs.length){ bs[k].className = (parseInt(bs[k].getAttribute('data-v'), 10) === v) ? 'on' : ''; k++; }
+  $('pwm').innerText = v + '% (' + Math.round(v * 255 / 100) + '/255)';
+  $('thrB').innerText = v;
+  $('spdT').innerText = v + '%';
+  $('spdBar').style.width = v + '%';
+};
+
+/* ---- user actions ---- */
+var setMode = function(m){
+  if (!state.armed){ $('deckMsg').innerText = 'Interlock disarmed - arm it before starting a drive mode.'; return; }
+  hold();
+  state.mode = m;
+  renderMode();
+  if (m === 'auto') cmd('obstacle_on');
+  else if (m === 'line') cmd('line_on');
+  else cmd('stop');
+};
+
+var stopEverything = function(){
+  hold();
+  clearMoving();
+  state.mode = 'manual';
+  renderMode();
+  cmd('stop');
+};
+
+var interlock = function(){
+  hold();
+  state.armed = $('safe').checked;
+  fetch('/arm?v=' + (state.armed ? 1 : 0)).catch(function(){});
+  if (!state.armed){ state.mode = 'manual'; clearMoving(); }
+  renderArm();
+  renderMode();
+};
+
+var setThrottle = function(v){
+  hold();
+  renderThrottle(v);
+  fetch('/speed?v=' + Math.round(v * 255 / 100)).catch(function(){});
+};
+
+var toggleLed = function(n){
+  hold();
+  ledState[n] = !ledState[n];
+  cmd('led' + n + (ledState[n] ? 'on' : 'off'));
+  renderLeds();
+};
+
+/* ---- drive pad: press = move, release = stop (only if a press happened) ---- */
+var DIR_LABEL = {forward:'FORWARD', backward:'REVERSE', left:'LEFT', right:'RIGHT', clockwise:'ROTATE CW', contrarotate:'ROTATE CCW'};
+var padLocked = function(){ return !state.armed || state.mode !== 'manual'; };
+var startMove = function(d){
+  if (padLocked() || moving === d) return;
+  clearMoving();
+  moving = d;
+  var el = $('b-' + d);
+  if (el) el.classList.add('on');
+  $('vec').innerText = DIR_LABEL[d];
+  cmd(d);
+};
+var stopMove = function(d){
+  if (moving !== d) return;
+  clearMoving();
+  cmd('stop');
+};
+var bindPad = function(el){
+  var d = el.getAttribute('data-d');
+  el.addEventListener('pointerdown', function(ev){ ev.preventDefault(); startMove(d); });
+  el.addEventListener('pointerup', function(){ stopMove(d); });
+  el.addEventListener('pointerleave', function(){ stopMove(d); });
+  el.addEventListener('pointercancel', function(){ stopMove(d); });
+};
+var padBtns = document.querySelectorAll('.dbtn[data-d]');
+var pb = 0;
+while (pb < padBtns.length){ bindPad(padBtns[pb]); pb++; }
+
+var KEYS = {w:'forward', arrowup:'forward', s:'backward', arrowdown:'backward', a:'left', arrowleft:'left', d:'right', arrowright:'right', q:'contrarotate', e:'clockwise'};
+var typing = function(ev){
+  var t = ev.target && ev.target.tagName;
+  return t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA';
+};
+document.addEventListener('keydown', function(ev){
+  if (ev.repeat || typing(ev)) return;
+  var k = ev.key.toLowerCase();
+  if (k === ' '){ ev.preventDefault(); stopEverything(); return; }
+  var d = KEYS[k];
+  if (d){ ev.preventDefault(); startMove(d); }
+});
+document.addEventListener('keyup', function(ev){
+  if (typing(ev)) return;
+  var d = KEYS[ev.key.toLowerCase()];
+  if (d) stopMove(d);
+});
+
+/* ---- radar ---- */
+var RMAX = 100;
+var curAngle = 90;
+var lastDist = 0;
+var dragging = false;
+var isDanger = function(){ return lastDist > 0 && lastDist < 10; };
+var NS = 'http://www.w3.org/2000/svg';
+var TR = 18;
+var trailEls = [];
+var trail = [];
+var tg = $('trail');
+var tk = 0;
+while (tk < TR){
+  var c = document.createElementNS(NS, 'circle');
+  c.setAttribute('r', 0);
+  tg.appendChild(c);
+  trailEls.push(c);
+  tk++;
+}
+var polar = function(dist){
+  var rot = (90 - curAngle) * Math.PI / 180;
+  var r = dist / RMAX * 190;
+  return {x: 200 + r * Math.sin(rot), y: 205 - r * Math.cos(rot)};
+};
+var renderTrail = function(){
+  var k = 0;
+  while (k < TR){
+    var c2 = trailEls[k];
+    var p = trail[k];
+    if (p){
+      c2.setAttribute('cx', p.x);
+      c2.setAttribute('cy', p.y);
+      c2.setAttribute('r', 3);
+      c2.style.opacity = ((k + 1) / trail.length * 0.7).toFixed(2);
+      c2.style.fill = p.dg ? 'var(--rd)' : 'var(--gr)';
+    } else { c2.setAttribute('r', 0); }
+    k++;
+  }
+};
+var pushTrail = function(){
+  if (lastDist > 0 && lastDist <= RMAX){
+    var p = polar(lastDist);
+    trail.push({x:p.x, y:p.y, dg:isDanger()});
+    if (trail.length > TR) trail.shift();
+  }
+  renderTrail();
+};
+var drawRadar = function(){
+  $('beam').style.transform = 'rotate(' + (90 - curAngle) + 'deg)';
+  var blip = $('blip');
+  if (lastDist > 0 && lastDist <= RMAX){
+    var p = polar(lastDist);
+    blip.setAttribute('cx', p.x);
+    blip.setAttribute('cy', p.y);
+    blip.setAttribute('r', 5);
+  } else { blip.setAttribute('r', 0); }
+};
+var updateProx = function(){
+  var dg = isDanger();
+  document.body.setAttribute('data-alert', dg ? '1' : '0');
+  var txt = lastDist > 0 ? lastDist : '--';
+  $('dist').innerText = txt;
+  $('hudDist').innerText = txt;
+  $('rdDist').innerText = txt;
+  $('radState').innerText = dg ? 'DANGER - OBJECT NEARBY' : 'SAFE';
+  $('obsState').innerText = dg ? 'DANGER' : (lastDist > 0 && lastDist <= 25 ? 'CAUTION' : 'CLEAR');
+  $('camAlert').innerText = dg ? 'DANGER' : 'CLEAR';
+};
+
+/* ---- servo (throttled sends) ---- */
+var servoPend = 90;
+var servoTimer = null;
+var sendServo = function(v){
+  servoPend = v;
+  if (servoTimer) return;
+  servoTimer = setTimeout(function(){
+    servoTimer = null;
+    fetch('/servo?angle=' + servoPend).catch(function(){});
+  }, 80);
+};
+var renderServo = function(v){
+  curAngle = v;
+  $('servoSlider').value = v;
+  $('servoVal').innerText = v + ' deg';
+  $('hudServo').innerText = v;
+  $('servoB').innerText = v;
+  drawRadar();
+};
+var servoMoved = function(v){
+  v = parseInt(v, 10);
+  hold();
+  curAngle = v;
+  $('servoVal').innerText = v + ' deg';
+  $('hudServo').innerText = v;
+  $('servoB').innerText = v;
+  sendServo(v);
+  drawRadar();
+};
+var snapServo = function(v){ $('servoSlider').value = v; servoMoved(v); };
+$('servoSlider').addEventListener('pointerdown', function(){ dragging = true; });
+$('servoSlider').addEventListener('pointerup', function(){ dragging = false; });
+$('servoSlider').addEventListener('change', function(){ dragging = false; });
+var sweepDir = 5;
+var sweepTimer = null;
+var sweepToggle = function(){
+  if (sweepTimer){ clearInterval(sweepTimer); sweepTimer = null; }
+  if ($('autoSweep').checked){
+    sweepTimer = setInterval(function(){
+      var cur = parseInt($('servoSlider').value, 10) + sweepDir;
+      if (cur >= 180){ cur = 180; sweepDir = -5; }
+      if (cur <= 0){ cur = 0; sweepDir = 5; }
+      $('servoSlider').value = cur;
+      servoMoved(cur);
+    }, 200);
+  }
+};
+
+/* ---- Vande Mataram (Web Audio) ---- */
+var REST = 0;
+var NOTE = { C4:262, D4:294, E4:330, F4:349, G4:392, A4:440, AS4:466, B4:494, C5:523, D5:587 };
+var vmMelody = [
+  NOTE.C4, NOTE.D4, NOTE.F4, NOTE.G4, NOTE.F4, NOTE.G4, REST,
+  NOTE.F4, NOTE.G4, NOTE.B4, NOTE.C5, NOTE.B4, NOTE.C5, REST,
+  NOTE.C5, NOTE.D5, NOTE.AS4, NOTE.A4, NOTE.G4,
+  NOTE.G4, NOTE.A4, NOTE.F4, NOTE.E4, NOTE.D4, REST,
+  NOTE.D4, NOTE.G4, NOTE.F4, NOTE.E4, NOTE.D4, NOTE.E4, NOTE.C4, REST,
+  NOTE.C4, NOTE.D4, NOTE.F4, NOTE.G4, NOTE.F4, NOTE.G4,
+  NOTE.G4, NOTE.AS4, NOTE.A4, NOTE.G4, REST,
+  NOTE.F4, NOTE.G4, NOTE.B4, NOTE.C5, NOTE.B4, NOTE.C5, REST,
+  NOTE.F4, NOTE.G4, NOTE.B4, NOTE.B4, NOTE.B4,
+  NOTE.B4, NOTE.C5, NOTE.B4, NOTE.C5, REST,
+  NOTE.B4, NOTE.B4, NOTE.B4, NOTE.C5, NOTE.B4, NOTE.C5,
+  NOTE.C5, NOTE.D5, NOTE.C5, NOTE.AS4, NOTE.AS4, NOTE.A4, NOTE.AS4, NOTE.A4, NOTE.G4, REST,
+  NOTE.D4, NOTE.F4, NOTE.E4, NOTE.D4,
+  NOTE.D4, NOTE.AS4, NOTE.A4, NOTE.AS4, NOTE.A4, NOTE.G4, REST,
+  NOTE.F4, NOTE.G4, NOTE.B4, NOTE.B4, NOTE.B4, NOTE.B4,
+  NOTE.B4, NOTE.C5, NOTE.B4, NOTE.C5, REST,
+  NOTE.F4, NOTE.G4, NOTE.B4, NOTE.C5, NOTE.B4, NOTE.C5, REST,
+  NOTE.F4, NOTE.G4, NOTE.B4, NOTE.C5, NOTE.B4, NOTE.C5
+];
+var vmDurations = [
+  4, 4, 4, 4, 4, 2, 4,
+  4, 4, 4, 4, 4, 2, 4,
+  4, 4, 4, 4, 4,
+  4, 4, 4, 4, 2, 4,
+  4, 4, 4, 4, 4, 4, 2, 4,
+  4, 4, 4, 4, 4, 4,
+  4, 4, 4, 2, 4,
+  4, 4, 4, 4, 4, 2, 4,
+  4, 4, 4, 8, 8,
+  4, 4, 4, 2, 4,
+  4, 4, 4, 4, 4, 2,
+  4, 4, 4, 8, 8, 8, 8, 8, 2, 4,
+  4, 4, 4, 2,
+  4, 8, 8, 8, 8, 2, 4,
+  4, 4, 4, 8, 8, 4,
+  4, 4, 4, 2, 4,
+  4, 4, 4, 4, 4, 2, 4,
+  4, 4, 4, 4, 4, 1
+];
+var audioCtx = null;
+var masterGain = null;
+var vmStopFlag = false;
+var setupAudio = function(){
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  var comp = audioCtx.createDynamicsCompressor();
+  comp.threshold.setValueAtTime(-12, audioCtx.currentTime);
+  comp.knee.setValueAtTime(24, audioCtx.currentTime);
+  comp.ratio.setValueAtTime(4, audioCtx.currentTime);
+  masterGain = audioCtx.createGain();
+  masterGain.gain.setValueAtTime(0.9, audioCtx.currentTime);
+  masterGain.connect(comp);
+  comp.connect(audioCtx.destination);
+};
+var playVande = function(){
+  setupAudio();
+  vmStopFlag = false;
+  var n = 0;
+  var playNext = function(){
+    if (vmStopFlag || n >= vmMelody.length){
+      $('vandeSwitch').checked = false;
+      return;
+    }
+    var note = vmMelody[n];
+    var dur = vmDurations[n];
+    if (note === REST){ n++; setTimeout(playNext, 100 * dur); return; }
+    var sec = (1050 / dur) / 1000;
+    var now = audioCtx.currentTime;
+    var attack = Math.min(0.02, sec * 0.2);
+    var release = sec * 0.55;
+    var o1 = audioCtx.createOscillator();
+    o1.type = 'triangle';
+    o1.frequency.value = note;
+    var o2 = audioCtx.createOscillator();
+    o2.type = 'sine';
+    o2.frequency.value = note * 2;
+    var hg = audioCtx.createGain();
+    hg.gain.value = 0.15;
+    var ng = audioCtx.createGain();
+    ng.gain.setValueAtTime(0.0001, now);
+    ng.gain.exponentialRampToValueAtTime(0.9, now + attack);
+    ng.gain.exponentialRampToValueAtTime(0.4, now + attack + release);
+    o1.connect(ng); o2.connect(hg); hg.connect(ng); ng.connect(masterGain);
+    o1.start(now); o1.stop(now + sec + 0.05);
+    o2.start(now); o2.stop(now + sec + 0.05);
+    n++;
+    setTimeout(playNext, sec * 1000 * 1.25);
+  };
+  playNext();
+};
+var toggleVande = function(){
+  if ($('vandeSwitch').checked){ playVande(); } else { vmStopFlag = true; }
+};
+
+/* ---- camera (ESP32-CAM WebSocket, pull-based) ---- */
+var CAM_WS_URL = 'ws://192.168.4.50/ws';
+var camWs = null;
+var camLastUrl = null;
+var camTimer = null;
+var setCamStatus = function(text, cls){
+  var el = $('camStatus');
+  el.innerText = text;
+  el.className = 'chip cs' + (cls ? ' ' + cls : '');
+};
+var scheduleCam = function(){
+  if (camTimer) return;
+  camTimer = setTimeout(function(){ camTimer = null; connectCam(); }, 2000);
+};
+var connectCam = function(){
+  setCamStatus('Connecting');
+  try{ camWs = new WebSocket(CAM_WS_URL); }
+  catch(e){ setCamStatus('Cam Offline', 'err'); scheduleCam(); return; }
+  camWs.binaryType = 'arraybuffer';
+  camWs.onopen = function(){
+    setCamStatus('Live', 'live');
+    $('camPlaceholder').style.display = 'none';
+    camWs.send('next');
+  };
+  camWs.onmessage = function(ev){
+    var blob = new Blob([ev.data], {type:'image/jpeg'});
+    if (camLastUrl) URL.revokeObjectURL(camLastUrl);
+    camLastUrl = URL.createObjectURL(blob);
+    $('camStream').src = camLastUrl;
+    camWs.send('next');
+  };
+  camWs.onclose = function(){ setCamStatus('Cam Offline', 'err'); scheduleCam(); };
+  camWs.onerror = function(){ setCamStatus('Cam Offline', 'err'); };
+};
+connectCam();
+
+/* ---- Mission Analysis ---- */
+var analyzeTimer = null;
+var lastTelemetry = null;
+var showAnalysis = function(title, msg, status){
+  var el = $('analyzePopup');
+  el.innerHTML = '<div class="at">' + title + '</div><div class="am">' + msg + '</div>';
+  el.className = 'popup show ' + status;
+  if (analyzeTimer) clearTimeout(analyzeTimer);
+  analyzeTimer = setTimeout(function(){ el.className = 'popup ' + status; }, 3000);
+};
+var analyze = function(){
+  var d = lastTelemetry;
+  if (!d || d.temp === '--' || d.hum === '--' || !d.gasReady){
+    showAnalysis('Analysis Incomplete', 'Sensors are still calibrating. Try again once telemetry is fully online.', 'danger');
+    return;
+  }
+  var temp = parseFloat(d.temp);
+  var hum = parseFloat(d.hum);
+  var ppm = parseFloat(d.ppm);
+  var line = 'Temp ' + temp.toFixed(1) + ' deg C, Humidity ' + hum.toFixed(1) + '%, Gas ' + ppm.toFixed(0) + ' ppm. ';
+  if (ppm > 400){
+    showAnalysis('Atmospheric Hazard', line + 'Gas concentration exceeds safe limits - atmosphere unsafe for extended surface operations. Water signature cannot be reliably confirmed under these conditions.', 'danger');
+  } else if (hum >= 55){
+    showAnalysis('Water Signature Detected', line + 'Atmosphere within safe limits. High humidity strongly suggests subsurface ice or water deposits nearby.', 'safe');
+  } else if (hum >= 35){
+    showAnalysis('Trace Moisture Found', line + 'Atmosphere within safe limits. Moderate humidity indicates trace water vapor in the local atmosphere.', 'safe');
+  } else if (temp > 30){
+    showAnalysis('Arid Terrain', line + 'Atmosphere within safe limits, but low humidity and high temperature point to an arid site with minimal water presence.', 'safe');
+  } else {
+    showAnalysis('Dry Conditions', line + 'Atmosphere within safe limits. Low humidity readings suggest minimal chance of water presence at this site.', 'safe');
+  }
+};
+
+/* ---- telemetry polling: also syncs the page to the rover's real state ---- */
+var setArc = function(id, f){
+  f = Math.max(0, Math.min(1, f));
+  $(id).style.strokeDashoffset = 251.2 * (1 - f);
+};
+var syncFromRover = function(d){
+  if (Date.now() < holdUntil) return;
+  if (d.armed !== undefined && d.armed !== state.armed){ state.armed = d.armed; renderArm(); renderMode(); }
+  if (d.mode && d.mode !== state.mode){ state.mode = d.mode; renderMode(); }
+  if (d.led1 !== undefined){ ledState[1] = d.led1; ledState[2] = d.led2; renderLeds(); }
+  if (d.speed !== undefined){
+    var pct = Math.round(d.speed * 100 / 255);
+    var opts = [25, 50, 75, 100];
+    var best = 100, bd = 999, k = 0;
+    while (k < 4){ var df = Math.abs(opts[k] - pct); if (df < bd){ bd = df; best = opts[k]; } k++; }
+    if (best !== curThrottle) renderThrottle(best);
+  }
+  if (d.servo !== undefined && !dragging && !servoTimer && !$('autoSweep').checked){
+    if (d.servo !== curAngle) renderServo(d.servo);
+  }
+};
+var polling = false;
+setInterval(function(){
+  if (polling) return;
+  polling = true;
+  var ts = Date.now();
+  var ac = new AbortController();
+  var to = setTimeout(function(){ ac.abort(); }, 2500);
+  fetch('/telemetry', {signal: ac.signal}).then(function(r){ return r.json(); }).then(function(d){
+    clearTimeout(to);
+    polling = false;
+    $('pingVal').innerText = Date.now() - ts;
+    $('linkDot').className = 'dot';
+    $('linkTxt').innerText = 'LINK ACTIVE';
+    lastTelemetry = d;
+    syncFromRover(d);
+    $('temp').innerText = d.temp;
+    $('hum').innerText = d.hum;
+    if (d.temp !== '--') setArc('tempArc', parseFloat(d.temp) / 50);
+    if (d.hum !== '--') setArc('humArc', parseFloat(d.hum) / 100);
+    lastDist = parseInt(d.dist, 10) || 0;
+    updateProx();
+    drawRadar();
+    pushTrail();
+    var gv = $('gasValue'), gu = $('gasUnit'), gs = $('gasState'), gb = $('gasBar');
+    if (d.gasReady){
+      var p = parseFloat(d.ppm);
+      gv.innerText = d.ppm;
+      gu.innerText = 'ppm';
+      gb.style.width = Math.min(100, p / 600 * 100) + '%';
+      if (p > 400){ gb.style.background = 'var(--rd)'; gs.innerText = 'HAZARD'; gs.style.color = 'var(--rd)'; }
+      else { gb.style.background = 'var(--cy)'; gs.innerText = 'NOMINAL'; gs.style.color = 'var(--gr)'; }
+    } else {
+      gv.innerText = d.secLeft > 0 ? d.secLeft : 'Ready';
+      gu.innerText = d.secLeft > 0 ? 'sec' : '';
+      gs.innerText = 'CALIBRATING';
+      gb.style.width = '0';
+    }
+  }).catch(function(){
+    clearTimeout(to);
+    polling = false;
+    $('linkDot').className = 'dot red';
+    $('linkTxt').innerText = 'LINK LOST';
+  });
+}, 1000);
+
+/* initial paint */
+renderMode();
+renderArm();
+renderLeds();
+renderThrottle(100);
+drawRadar();
+updateProx();
+</script>
+</body>
+</html>
+)rawliteral";
+
+// ================= HTTP HANDLERS =================
+void handleRoot(){ server.send(200, "text/html; charset=utf-8", htmlPage); }
+
+void handleForward(){ if (!driveOK()){ sendLocked(); return; } ACB_SmartCar.Move(Forward, Speed1); sendOK(); }
+void handleBackward(){ if (!driveOK()){ sendLocked(); return; } ACB_SmartCar.Move(Backward, Speed1); sendOK(); }
+void handleLeft(){ if (!driveOK()){ sendLocked(); return; } ACB_SmartCar.Move(Move_Left, Speed1); sendOK(); }
+void handleRight(){ if (!driveOK()){ sendLocked(); return; } ACB_SmartCar.Move(Move_Right, Speed1); sendOK(); }
+void handleClockwise(){ if (!driveOK()){ sendLocked(); return; } ACB_SmartCar.Move(Clockwise, Speed1); sendOK(); }
+void handleContrarotate(){ if (!driveOK()){ sendLocked(); return; } ACB_SmartCar.Move(Contrarotate, Speed1); sendOK(); }
+
+// STOP always works: kills motion and cancels both drive modes.
+void handleStop(){
+  mode_state = false;
+  lineTrack_state = false;
+  ACB_SmartCar.Move(Stop, 0);
+  sendOK();
+}
+
+// Safety interlock: disarming stops everything and blocks all drive commands.
+void handleArm(){
+  if (server.hasArg("v")){
+    armed = (server.arg("v").toInt() != 0);
+    if (!armed){
+      mode_state = false;
+      lineTrack_state = false;
+      ACB_SmartCar.Move(Stop, 0);
+    }
+  }
+  sendOK();
+}
+
+void handleLed1On(){ digitalWrite(LED1_PIN, HIGH); led1State = true; sendOK(); }
+void handleLed1Off(){ digitalWrite(LED1_PIN, LOW); led1State = false; sendOK(); }
+void handleLed2On(){ digitalWrite(LED2_PIN, HIGH); led2State = true; sendOK(); }
+void handleLed2Off(){ digitalWrite(LED2_PIN, LOW); led2State = false; sendOK(); }
+
+void handleObstacleOn(){ if (!armed){ sendLocked(); return; } lineTrack_state = false; mode_state = true; sendOK(); }
+void handleObstacleOff(){ mode_state = false; sendOK(); }
+void handleLineOn(){ if (!armed){ sendLocked(); return; } mode_state = false; lineTrack_state = true; sendOK(); }
+void handleLineOff(){ lineTrack_state = false; sendOK(); }
+
+void handleServo(){
+  if (server.hasArg("angle")){
+    setServo(server.arg("angle").toInt());
+  }
+  sendOK();
+}
+
+void handleSpeed(){
+  if (server.hasArg("v")) Speed1 = constrain(server.arg("v").toInt(), 0, 255);
+  sendOK();
+}
+
+void handleTelemetry(){
+  int d = myUltrasonic.Ranging();
+
+  int secLeft = 0;
+  if (!gasReady){
+    long remain = 15 - ((millis() - gasStartTime) / 1000);
+    secLeft = remain > 0 ? (int)remain : 0;
+  }
+
+  String t = isnan(lastTemp) ? "--" : String(lastTemp, 1);
+  String h = isnan(lastHum)  ? "--" : String(lastHum, 1);
+
+  float safePPM = lastPPM;
+  if (isnan(safePPM) || isinf(safePPM) || safePPM < 0) safePPM = 0;
+
+  String json = "{";
+  json += "\"dist\":" + String(d) + ",";
+  json += "\"temp\":\"" + t + "\",";
+  json += "\"hum\":\"" + h + "\",";
+  json += "\"gasReady\":" + String(gasReady ? "true" : "false") + ",";
+  json += "\"secLeft\":" + String(secLeft) + ",";
+  json += "\"ppm\":" + String(safePPM, 0) + ",";
+  json += "\"mode\":\"";
+  json += (mode_state ? "auto" : (lineTrack_state ? "line" : "manual"));
+  json += "\",";
+  json += "\"armed\":" + String(armed ? "true" : "false") + ",";
+  json += "\"led1\":" + String(led1State ? "true" : "false") + ",";
+  json += "\"led2\":" + String(led2State ? "true" : "false") + ",";
+  json += "\"speed\":" + String(Speed1) + ",";
+  json += "\"servo\":" + String(servoAngle);
+  json += "}";
+
+  server.send(200, "application/json", json);
+}
+
+// ================= SETUP / LOOP =================
+void setup() {
+  Serial.begin(115200);
+  randomSeed(analogRead(0));
+
+  ACB_SmartCar.Init();
+  ACB_SmartCar.motorControl(1, 0);
+  ACB_SmartCar.motorControl(2, 0);
+  ACB_SmartCar.motorControl(3, 0);
+  ACB_SmartCar.motorControl(4, 0);
+
+  pinMode(LED1_PIN, OUTPUT);
+  pinMode(LED2_PIN, OUTPUT);
+  digitalWrite(LED1_PIN, LOW);
+  digitalWrite(LED2_PIN, LOW);
+
+  pinMode(LEFT_IR_PIN, INPUT);
+  pinMode(MID_IR_PIN, INPUT);
+  pinMode(RIGHT_IR_PIN, INPUT);
+
+  dht.begin();
+  gasStartTime = millis();
+
+  myUltrasonic.Init(13, 14);
+
+  ESP32PWM::allocateTimer(1);
+  myServo.attach(SERVO_PIN);
+  setServo(90);
+
+  WiFi.softAP(ap_ssid, ap_password);
+  Serial.print("Access Point IP: ");
+  Serial.println(WiFi.softAPIP());
+  Serial.println("ESP32-CAM should connect as station and take 192.168.4.50");
+
+  server.on("/", handleRoot);
+  server.on("/forward", handleForward);
+  server.on("/backward", handleBackward);
+  server.on("/left", handleLeft);
+  server.on("/right", handleRight);
+  server.on("/clockwise", handleClockwise);
+  server.on("/contrarotate", handleContrarotate);
+  server.on("/stop", handleStop);
+  server.on("/arm", handleArm);
+  server.on("/led1on", handleLed1On);
+  server.on("/led1off", handleLed1Off);
+  server.on("/led2on", handleLed2On);
+  server.on("/led2off", handleLed2Off);
+  server.on("/obstacle_on", handleObstacleOn);
+  server.on("/obstacle_off", handleObstacleOff);
+  server.on("/line_on", handleLineOn);
+  server.on("/line_off", handleLineOff);
+  server.on("/servo", handleServo);
+  server.on("/speed", handleSpeed);
+  server.on("/telemetry", handleTelemetry);
+
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+  updateDHT();
+  updateGas();
+
+  if (mode_state && !obstacleRunning && !lineTrackRunning) {
+    ObstacleAvoidance();
+  }
+  if (lineTrack_state && !lineTrackRunning && !obstacleRunning) {
+    LineTracking();
+  }
+}

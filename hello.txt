@@ -1,0 +1,244 @@
+#include "esp_camera.h"
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncTCP.h>
+
+// ===== JOIN THE ROVER'S WIFI (must match the rover's AP exactly) =====
+const char* rover_ssid     = "ESP32_SmartCar";
+const char* rover_password = "12345678";
+
+// Static IP on the rover's AP subnet (rover itself is always 192.168.4.1)
+IPAddress cam_ip(192, 168, 4, 50);
+IPAddress cam_gateway(192, 168, 4, 1);
+IPAddress cam_subnet(255, 255, 255, 0);
+// ========================================================================
+
+// ---------- AI-THINKER ESP32-CAM PIN MAP ----------
+#define PWDN_GPIO_NUM     32
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM      0
+#define SIOD_GPIO_NUM     26
+#define SIOC_GPIO_NUM     27
+#define Y9_GPIO_NUM       35
+#define Y8_GPIO_NUM       34
+#define Y7_GPIO_NUM       39
+#define Y6_GPIO_NUM       36
+#define Y5_GPIO_NUM       21
+#define Y4_GPIO_NUM       19
+#define Y3_GPIO_NUM       18
+#define Y2_GPIO_NUM        5
+#define VSYNC_GPIO_NUM    25
+#define HREF_GPIO_NUM     23
+#define PCLK_GPIO_NUM     22
+// ----------------------------------------------------
+
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+
+uint32_t activeClientId = 0;
+bool hasActiveClient = false;
+volatile bool readyForNextFrame = false;
+
+// Minimal standalone debug page - lets you open the cam's own IP directly
+// to check the feed without going through the rover dashboard.
+const char PAGE_HTML[] PROGMEM = R"HTMLPAGE(
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32-CAM Direct Debug View</title>
+<style>
+  body{margin:0;background:#000;display:flex;flex-direction:column;
+       align-items:center;justify-content:center;min-height:100vh;
+       font-family:Arial,sans-serif;}
+  h2{color:#eee;font-weight:400;letter-spacing:1px;margin:16px 0;}
+  #status{color:#0f0;font-size:13px;margin-bottom:10px;}
+  #fps{color:#888;font-size:12px;margin-bottom:6px;}
+  img{max-width:95vw;max-height:85vh;border:2px solid #333;border-radius:6px;}
+</style>
+</head>
+<body>
+  <h2>ESP32-CAM Direct Debug View</h2>
+  <div id="status">Connecting...</div>
+  <div id="fps"></div>
+  <img id="stream" src="">
+<script>
+  let ws = new WebSocket("ws://" + location.host + "/ws");
+  ws.binaryType = "arraybuffer";
+  const img = document.getElementById("stream");
+  const status = document.getElementById("status");
+  const fpsEl = document.getElementById("fps");
+  let lastUrl = null;
+  let frameCount = 0;
+  let lastFpsTime = performance.now();
+
+  ws.onopen = () => {
+    status.textContent = "Connected";
+    ws.send("next");
+  };
+  ws.onclose = () => { status.textContent = "Disconnected - retrying..."; setTimeout(()=>location.reload(), 2000); };
+  ws.onerror = () => { status.textContent = "Error"; };
+
+  ws.onmessage = (event) => {
+    const blob = new Blob([event.data], { type: "image/jpeg" });
+    if (lastUrl) URL.revokeObjectURL(lastUrl);
+    lastUrl = URL.createObjectURL(blob);
+    img.src = lastUrl;
+
+    frameCount++;
+    const now = performance.now();
+    if (now - lastFpsTime >= 1000) {
+      fpsEl.textContent = frameCount + " fps";
+      frameCount = 0;
+      lastFpsTime = now;
+    }
+
+    ws.send("next");
+  };
+</script>
+</body>
+</html>
+)HTMLPAGE";
+
+void initCamera() {
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer   = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
+
+  if (psramFound()) {
+    config.frame_size = FRAMESIZE_QVGA;  // 320x240
+    config.jpeg_quality = 12;
+    config.fb_count = 2;
+    config.grab_mode = CAMERA_GRAB_LATEST;
+  } else {
+    config.frame_size = FRAMESIZE_QQVGA; // 160x120
+    config.jpeg_quality = 15;
+    config.fb_count = 1;
+  }
+
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    Serial.printf("Camera init failed: 0x%x\n", err);
+    return;
+  }
+}
+
+void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
+               AwsEventType type, void *arg, uint8_t *data, size_t len) {
+  if (type == WS_EVT_CONNECT) {
+    Serial.printf("WS client #%u connected\n", client->id());
+    client->client()->setNoDelay(true);
+
+    if (hasActiveClient && activeClientId != client->id()) {
+      AsyncWebSocketClient* old = ws.client(activeClientId);
+      if (old) old->close();
+    }
+    activeClientId = client->id();
+    hasActiveClient = true;
+    readyForNextFrame = false;
+
+  } else if (type == WS_EVT_DISCONNECT) {
+    Serial.printf("WS client #%u disconnected\n", client->id());
+    if (client->id() == activeClientId) {
+      hasActiveClient = false;
+      readyForNextFrame = false;
+    }
+  } else if (type == WS_EVT_DATA) {
+    if (client->id() == activeClientId) {
+      readyForNextFrame = true; // Client requested next frame
+    }
+  }
+}
+
+// Joins the rover's AP as a station. Blocks in setup() until connected -
+// this is fine here since nothing else needs to run before the network
+// is up, unlike the rover's own loop() which must stay responsive.
+void connectToRoverWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.config(cam_ip, cam_gateway, cam_subnet);
+  WiFi.begin(rover_ssid, rover_password);
+
+  Serial.print("Connecting to rover AP");
+  unsigned long startAttempt = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(400);
+    Serial.print(".");
+    // If the rover isn't up yet / out of range, keep retrying indefinitely
+    // rather than giving up - the cam is useless without this network.
+    if (millis() - startAttempt > 15000) {
+      Serial.println("\nStill trying, retrying connection...");
+      WiFi.disconnect();
+      delay(200);
+      WiFi.begin(rover_ssid, rover_password);
+      startAttempt = millis();
+    }
+  }
+  Serial.println("\nConnected to rover WiFi");
+  Serial.print("Cam IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(200);
+
+  initCamera();
+  delay(300);
+
+  connectToRoverWiFi();
+
+  ws.onEvent(onWsEvent);
+  server.addHandler(&ws);
+
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", PAGE_HTML);
+  });
+
+  server.begin();
+}
+
+void loop() {
+  // If the rover reboots or the cam drifts out of range, WiFi can drop -
+  // reconnect automatically instead of streaming into a dead socket.
+  if (WiFi.status() != WL_CONNECTED) {
+    hasActiveClient = false;
+    readyForNextFrame = false;
+    connectToRoverWiFi();
+  }
+
+  ws.cleanupClients();
+
+  if (hasActiveClient && readyForNextFrame) {
+    AsyncWebSocketClient* client = ws.client(activeClientId);
+    if (client && client->status() == WS_CONNECTED) {
+      camera_fb_t * fb = esp_camera_fb_get();
+      if (fb) {
+        if (fb->format == PIXFORMAT_JPEG) {
+          client->binary(fb->buf, fb->len);
+          readyForNextFrame = false; // Reset request flag until client asks again
+        }
+        esp_camera_fb_return(fb);
+      }
+    }
+  }
+  delay(1);
+}
