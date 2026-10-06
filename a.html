@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ORION-1 // Autonomous Ground Reconnaissance Console</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "cosmic": "#030014",
+            "void": "#060417",
+            "glass-surface": "rgba(255, 255, 255, 0.025)",
+            "glass-border": "rgba(255, 255, 255, 0.08)",
+            "glass-hover": "rgba(255, 255, 255, 0.05)",
+            "primary": "#c8bfff",
+            "primary-container": "#9382ff",
+            "accent-violet": "#ba9cff",
+            "accent-cyan": "#00f0ff",
+            "accent-crimson": "#ff5261",
+            "on-surface": "#e8ddff",
+            "dim-surface": "#8f8aa0"
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    body {
+      background-color: #030014;
+      color: #e8ddff;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow-x: hidden;
+      letter-spacing: -0.01em;
+    }
+    ::selection {
+      background: rgba(147, 130, 255, 0.25);
+      color: #ffffff;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #030014;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 9999px;
+    }
+    .frosted-glass {
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+    .frosted-pill {
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      backdrop-filter: blur(12px);
+    }
+    .radial-reflect-glow {
+      background: radial-gradient(circle 500px at 50% 120px, rgba(147, 130, 255, 0.18), rgba(120, 90, 255, 0.06) 45%, transparent 75%);
+    }
+    .orbit-ring {
+      border: 1px solid rgba(190, 170, 255, 0.08);
+      border-radius: 9999px;
+    }
+    .text-glow {
+      text-shadow: 0 0 35px rgba(200, 191, 255, 0.35);
+    }
+    @keyframes radarSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .radar-beam {
+      transform-origin: 100px 100px;
+      animation: radarSpin 4s linear infinite;
+    }
+    .linear-gradient-text {
+      background: linear-gradient(180deg, #FFFFFF 0%, rgba(255, 255, 255, 0.65) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-cosmic text-on-surface antialiased flex flex-col selection:bg-primary/20">
+<!-- Ambient Reflect.app Horizon Glow Aura -->
+<div class="fixed top-0 left-1/2 -translate-x-1/2 w-[1100px] h-[580px] radial-reflect-glow pointer-events-none z-0"></div>
+<div class="fixed -top-40 left-1/2 -translate-x-1/2 w-[850px] h-[340px] rounded-full bg-violet-600/10 blur-[130px] pointer-events-none z-0"></div>
+<!-- 1. FLOATING REFINED GLASS NAVIGATION BAR (Reflect / Linear aesthetic) -->
+<header class="fixed top-4 inset-x-0 z-50 flex justify-center px-4">
+<div class="w-full max-w-6xl frosted-glass rounded-full px-4 py-2.5 flex items-center justify-between shadow-[0_12px_36px_rgba(0,0,0,0.6)]">
+<!-- Brand Pill -->
+<a class="flex items-center gap-2.5 group" href="#">
+<div class="w-7 h-7 rounded-full overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center p-0.5 group-hover:border-primary/40 transition-colors">
+<img alt="ORION-1 Insignia" class="w-full h-full object-contain filter drop-shadow" src="https://lh3.googleusercontent.com/aida/AEtjO1UXlDSAJozGeWjpGszlEj7EteBsvU7KZFGUU1HnOuomjYC7xGR3afUSCep6-rCbxorfPNFrcqNF98vxV0qF7aP9oRyDPbxdT_-9iDsr7TpZyU_y5dMNIiyDbCJ0DX9Pg-UzayNYklF343561U2cIxABKFGQKT5mdxHVj088GJQnpgv46jmzDJVMXGO_DG8WsMCEnewCkzrf7b3fzEFlnNK6x9SnffMntwyuoBat_RghOwuX-AbtpGuPKe8"/>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-sm font-semibold tracking-tight text-white group-hover:text-primary transition-colors">ORION-1</span>
+<span class="text-[10px] font-mono text-dim-surface px-1.5 py-0.5 rounded bg-white/5 border border-white/5">REV-4.2</span>
+</div>
+</a>
+<!-- Center Links -->
+<nav class="hidden md:flex items-center gap-1 text-xs font-medium text-dim-surface">
+<a class="px-3 py-1.5 rounded-full hover:text-white hover:bg-white/5 transition-colors" href="#mission-overview">Mission</a>
+<a class="px-3 py-1.5 rounded-full hover:text-white hover:bg-white/5 transition-colors" href="#telemetry-deck">Telemetry Deck</a>
+<a class="px-3 py-1.5 rounded-full hover:text-white hover:bg-white/5 transition-colors" href="#hardware-architecture">Architecture</a>
+<a class="px-3 py-1.5 rounded-full hover:text-white hover:bg-white/5 transition-colors" href="#operator-protocols">Protocols</a>
+<a class="px-3 py-1.5 rounded-full hover:text-white hover:bg-white/5 transition-colors" href="#firmware-ide">Firmware</a>
+<a class="px-3 py-1.5 rounded-full hover:text-white hover:bg-white/5 transition-colors flex items-center gap-1.5" href="https://github.com/NeelDevOfficial" rel="noreferrer" target="_blank">
+<span>GitHub</span>
+<span class="material-symbols-outlined text-[13px] opacity-70">arrow_outward</span>
+</a>
+</nav>
+<!-- Right Controls: Palette & Architecture Badge -->
+<div class="flex items-center gap-2">
+<div class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full frosted-pill text-[11px] font-mono text-dim-surface">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+<span>AP: 192.168.4.1</span>
+</div>
+<!-- Palette Selector Pill -->
+<div class="relative">
+<button class="h-8 px-2.5 rounded-full frosted-pill hover:bg-white/10 text-xs font-mono text-dim-surface hover:text-white transition-all flex items-center gap-1.5" id="paletteDropdownBtn" onclick="togglePaletteMenu()">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="hidden lg:inline text-[11px]" id="currentPaletteLabel">Obsidian Violet</span>
+<span class="material-symbols-outlined text-sm">unfold_more</span>
+</button>
+<div class="hidden absolute right-0 mt-2 w-48 frosted-glass rounded-xl p-1.5 shadow-2xl flex flex-col gap-0.5 text-xs z-50" id="paletteMenu">
+<button class="px-2.5 py-1.5 rounded-lg text-left text-dim-surface hover:text-white hover:bg-white/5 flex items-center gap-2" onclick="applyPalette('obsidian', 'Obsidian Violet', '#9382ff')">
+<span class="w-2 h-2 rounded-full bg-[#9382ff]"></span> Obsidian Violet
+            </button>
+<button class="px-2.5 py-1.5 rounded-lg text-left text-dim-surface hover:text-white hover:bg-white/5 flex items-center gap-2" onclick="applyPalette('spacex', 'SpaceX Dark', '#00f0ff')">
+<span class="w-2 h-2 rounded-full bg-[#00f0ff]"></span> SpaceX Dark
+            </button>
+<button class="px-2.5 py-1.5 rounded-lg text-left text-dim-surface hover:text-white hover:bg-white/5 flex items-center gap-2" onclick="applyPalette('tokyo', 'Tokyo Night', '#7dcfff')">
+<span class="w-2 h-2 rounded-full bg-[#7dcfff]"></span> Tokyo Night
+            </button>
+<button class="px-2.5 py-1.5 rounded-lg text-left text-dim-surface hover:text-white hover:bg-white/5 flex items-center gap-2" onclick="applyPalette('minimal', 'Clean Minimal', '#ffffff')">
+<span class="w-2 h-2 rounded-full bg-white"></span> Clean Minimal
+            </button>
+</div>
+</div>
+<a class="h-8 px-3 rounded-full bg-white text-cosmic hover:bg-primary transition-all text-xs font-semibold flex items-center gap-1 shadow-sm" href="#telemetry-deck">
+<span>Console</span>
+<span class="material-symbols-outlined text-xs">arrow_forward</span>
+</a>
+</div>
+</div>
+</header>
+<main class="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 pt-32 pb-24 flex flex-col gap-24 relative z-10">
+<!-- 2. HERO SECTION (Reflect.app concentric orbital glow halo) -->
+<section class="relative pt-12 pb-6 flex flex-col items-center text-center" id="mission-overview">
+<!-- Reflect.app Planetary Orbit Arc Background Visual -->
+<div class="absolute -top-16 inset-x-0 flex items-center justify-center pointer-events-none select-none -z-10 opacity-70">
+<div class="relative w-[780px] h-[360px] flex items-center justify-center">
+<div class="absolute w-[720px] h-[720px] orbit-ring -top-[360px]"></div>
+<div class="absolute w-[540px] h-[540px] orbit-ring -top-[270px]"></div>
+<div class="absolute w-[360px] h-[360px] orbit-ring -top-[180px] border-violet-400/20"></div>
+<!-- Horizon Glowing Eclipse Line -->
+<div class="absolute top-[80px] w-[500px] h-px bg-gradient-to-r from-transparent via-violet-300/60 to-transparent shadow-[0_0_24px_rgba(186,156,255,0.8)]"></div>
+<!-- Star dots -->
+<div class="absolute top-10 left-32 w-1 h-1 bg-white/60 rounded-full animate-ping"></div>
+<div class="absolute top-24 right-40 w-1 h-1 bg-violet-300/70 rounded-full"></div>
+<div class="absolute top-4 right-1/4 w-0.5 h-0.5 bg-white/40 rounded-full"></div>
+</div>
+</div>
+<!-- Linear Badge Pill -->
+<div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full frosted-pill text-[11px] font-mono tracking-wide text-primary mb-8 border border-primary/20 hover:border-primary/40 transition-colors">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+<span class="font-medium">ORION-1 RECON // B.D.M. INTERNATIONAL • HARVARD CS50x</span>
+</div>
+<!-- Main Title -->
+<h1 class="text-4xl sm:text-6xl lg:text-7xl font-bold tracking-tight linear-gradient-text max-w-4xl text-glow leading-[1.08] mb-6">
+        Autonomous planetary reconnaissance, distilled.
+      </h1>
+<p class="text-base sm:text-lg text-dim-surface max-w-2xl font-normal leading-relaxed mb-10">
+        Engineered with dual-core ESP32 microcontrollers, omnidirectional mecanum kinematics, direct WebSocket telemetry, and ultrasonic vector telemetry.
+      </p>
+<!-- Action Group -->
+<div class="flex flex-wrap items-center justify-center gap-3">
+<a class="h-10 px-5 rounded-full bg-white text-cosmic font-medium text-xs tracking-wide flex items-center gap-2 hover:bg-primary transition-all shadow-[0_0_30px_rgba(200,191,255,0.3)]" href="#telemetry-deck">
+<span class="material-symbols-outlined text-sm">sensors</span>
+<span>Launch Telemetry Deck</span>
+</a>
+<a class="h-10 px-5 rounded-full frosted-pill hover:bg-white/10 text-xs font-medium text-white transition-all flex items-center gap-2" href="#operator-protocols">
+<span class="material-symbols-outlined text-sm text-dim-surface">developer_guide</span>
+<span>Operator Protocols</span>
+</a>
+<a class="h-10 px-5 rounded-full frosted-pill hover:bg-white/10 text-xs font-medium text-dim-surface hover:text-white transition-all flex items-center gap-2" href="#firmware-ide">
+<span class="material-symbols-outlined text-sm">terminal</span>
+<span>Firmware Workstation</span>
+</a>
+</div>
+<!-- Reflect-Style Metric Floating Ribbon -->
+<div class="w-full max-w-4xl grid grid-cols-2 sm:grid-cols-4 gap-3 mt-14">
+<div class="frosted-glass rounded-xl p-3.5 flex flex-col text-left">
+<span class="text-[10px] font-mono text-dim-surface uppercase tracking-wider">Martian Sol</span>
+<span class="text-xl font-semibold text-white font-mono mt-1">SOL 484</span>
+<span class="text-[10px] text-emerald-400 font-mono mt-0.5">Surface Active</span>
+</div>
+<div class="frosted-glass rounded-xl p-3.5 flex flex-col text-left">
+<span class="text-[10px] font-mono text-dim-surface uppercase tracking-wider">Mission Elapsed Time</span>
+<span class="text-xl font-semibold text-primary font-mono mt-1" id="heroMetClock">042:18:24</span>
+<span class="text-[10px] text-dim-surface font-mono mt-0.5">Continuous MET</span>
+</div>
+<div class="frosted-glass rounded-xl p-3.5 flex flex-col text-left">
+<span class="text-[10px] font-mono text-dim-surface uppercase tracking-wider">Processor Clock</span>
+<span class="text-xl font-semibold text-white font-mono mt-1">240 MHz</span>
+<span class="text-[10px] text-primary font-mono mt-0.5">Dual-Core Xtensa</span>
+</div>
+<div class="frosted-glass rounded-xl p-3.5 flex flex-col text-left">
+<span class="text-[10px] font-mono text-dim-surface uppercase tracking-wider">Link RSSI</span>
+<span class="text-xl font-semibold text-emerald-400 font-mono mt-1">99.4%</span>
+<span class="text-[10px] text-emerald-400/80 font-mono mt-0.5">-42 dBm Local AP</span>
+</div>
+</div>
+</section>
+<!-- 3. LEAD SYSTEMS ARCHITECT (Refined, Executive, Typography-driven, No Childish avatar) -->
+<section class="w-full">
+<div class="frosted-glass rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 border border-white/5 relative overflow-hidden">
+<!-- Subtle background linear accent line -->
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-primary/60 via-violet-500/20 to-transparent"></div>
+<div class="flex flex-col gap-2 max-w-2xl pl-2">
+<div class="flex items-center gap-2">
+<span class="text-[11px] font-mono text-primary uppercase tracking-wider">Lead Systems Architect</span>
+<span class="text-dim-surface text-xs">•</span>
+<span class="text-[11px] font-mono text-dim-surface">Specialization: Embedded FreeRTOS &amp; Robotics</span>
+</div>
+<h2 class="text-2xl sm:text-3xl font-semibold tracking-tight text-white">
+            Subhroneel
+          </h2>
+<p class="text-xs sm:text-sm text-dim-surface leading-relaxed mt-1">
+            Student systems architect at <strong class="text-white font-medium">B.D.M. International</strong> (Kolkata) and <strong class="text-white font-medium">Harvard CS50x Scholar</strong>. Designed and deployed the low-latency WebSocket motor matrix, ultrasonic horizon telemetry, and dual ESP32 embedded streaming infrastructure.
+          </p>
+<div class="flex flex-wrap items-center gap-2 pt-2 text-[11px] font-mono text-dim-surface">
+<span class="px-2 py-0.5 rounded frosted-pill border border-white/5 text-white/90">B.D.M. International</span>
+<span class="px-2 py-0.5 rounded frosted-pill border border-white/5 text-primary">C++ / FreeRTOS / ESP32</span>
+<span class="px-2 py-0.5 rounded frosted-pill border border-white/5 text-emerald-400">Harvard CS50x Certified</span>
+</div>
+</div>
+<!-- Inscription & Profile Link -->
+<div class="flex flex-col md:items-end gap-3 shrink-0 pt-4 md:pt-0 border-t md:border-t-0 border-white/5">
+<div class="text-left md:text-right">
+<span class="text-[10px] font-mono text-dim-surface uppercase tracking-wider">Engineering Inscription</span>
+<div class="text-xl font-semibold tracking-wider text-primary italic font-sans mt-0.5">"Mak"</div>
+</div>
+<a class="h-9 px-4 rounded-full frosted-pill hover:bg-white/10 text-xs font-mono text-white transition-all flex items-center gap-2 self-start md:self-end" href="https://github.com/NeelDevOfficial" rel="noreferrer" target="_blank">
+<span class="material-symbols-outlined text-sm">code</span>
+<span>@NeelDevOfficial</span>
+<span class="material-symbols-outlined text-xs text-dim-surface">arrow_outward</span>
+</a>
+</div>
+</div>
+</section>
+<!-- 4. LIVE TELEMETRY DECK (Clean Procedural HUD Canvas + Radar Sweep + Micro Stats) -->
+<section class="flex flex-col gap-6 scroll-mt-28" id="telemetry-deck">
+<div class="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-white/5 pb-4">
+<div>
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+<h2 class="text-xl sm:text-2xl font-semibold tracking-tight text-white">Live Telemetry &amp; Vector Control Deck</h2>
+</div>
+<p class="text-xs text-dim-surface mt-1">Direct hardware stream simulated over WebSocket at ws://192.168.4.1/ws</p>
+</div>
+<div class="flex items-center gap-2 text-xs font-mono">
+<span class="px-2.5 py-1 rounded-full frosted-pill text-emerald-400 flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+<span>SOCKET 18ms</span>
+</span>
+<span class="px-2.5 py-1 rounded-full frosted-pill text-dim-surface">30 FPS STREAM</span>
+</div>
+</div>
+<!-- Bento Grid for Deck -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+<!-- Viewport Camera HUD (7 Columns) - Procedural Canvas / SVG HUD (No crude raster jpg) -->
+<div class="lg:col-span-7 frosted-glass rounded-2xl p-4 flex flex-col gap-3">
+<!-- Stream Header Details -->
+<div class="flex items-center justify-between text-xs font-mono border-b border-white/5 pb-2 text-dim-surface">
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-accent-crimson animate-pulse"></span>
+<span class="text-white font-medium">CAM-01: OV2640 OPTICAL RECON</span>
+</div>
+<div class="flex items-center gap-3">
+<span>640×480 VGA</span>
+<span class="text-emerald-400 font-semibold" id="camStreamFps">29.8 FPS</span>
+</div>
+</div>
+<!-- Procedural Vector Canvas HUD Viewport -->
+<div class="relative w-full aspect-video rounded-xl bg-void border border-white/5 overflow-hidden flex items-center justify-center group">
+<!-- Procedural Atmospheric Mars Twilight Canvas Simulation -->
+<div class="absolute inset-0 bg-gradient-to-b from-[#09081a] via-[#120a1c] to-[#1c0c16] opacity-90"></div>
+<!-- Horizon Curve Line -->
+<div class="absolute bottom-16 inset-x-0 h-24 bg-gradient-to-t from-orange-950/20 to-transparent"></div>
+<div class="absolute bottom-16 inset-x-0 h-px bg-white/10"></div>
+<!-- Procedural Minimalist Tactical HUD Overlays -->
+<div class="absolute inset-0 pointer-events-none p-5 flex flex-col justify-between font-mono text-[10px] text-dim-surface">
+<!-- Top HUD Info -->
+<div class="flex items-start justify-between">
+<div class="frosted-pill px-2.5 py-1 rounded text-white/80">
+                  LAT: 14.529° S // LON: 61.302° W
+                </div>
+<div class="frosted-pill px-2.5 py-1 rounded text-right text-primary">
+                  SERVO PAN: <span id="hudServoPanAngle">90</span>°
+                </div>
+</div>
+<!-- Center Reticle & Vector Crosshair -->
+<div class="absolute inset-0 flex items-center justify-center">
+<div class="relative w-28 h-28 border border-white/15 rounded-full flex items-center justify-center">
+<div class="w-10 h-10 border border-primary/40 rounded-full flex items-center justify-center">
+<div class="w-1 h-1 bg-accent-crimson rounded-full animate-ping"></div>
+</div>
+<div class="absolute w-full h-px bg-white/15"></div>
+<div class="absolute h-full w-px bg-white/15"></div>
+<span class="absolute top-1 left-2 text-[8px] text-primary">TGT-LOCK</span>
+<span class="absolute bottom-1 right-2 text-[8px] text-white/50">OPTICAL-01</span>
+</div>
+</div>
+<!-- Bottom HUD Info -->
+<div class="flex items-end justify-between">
+<div class="frosted-pill px-2 py-0.5 rounded text-emerald-400 flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> HAZARD CLEAR
+                </div>
+<div class="frosted-pill px-2 py-0.5 rounded text-accent-crimson flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-accent-crimson animate-pulse"></span> REC 00:48:12
+                </div>
+</div>
+</div>
+</div>
+<!-- Camera Stream Micro Controls -->
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono text-xs">
+<button class="h-9 rounded-lg frosted-pill hover:bg-white/10 flex items-center justify-center gap-1.5 transition-all text-white/80" id="btnLed1" onclick="toggleLight(1)">
+<span class="material-symbols-outlined text-sm text-primary">light_mode</span>
+<span>LED 1:</span> <span class="text-emerald-400" id="ledStatus1">ON</span>
+</button>
+<button class="h-9 rounded-lg frosted-pill hover:bg-white/10 flex items-center justify-center gap-1.5 transition-all text-white/80" id="btnLed2" onclick="toggleLight(2)">
+<span class="material-symbols-outlined text-sm text-primary">light_mode</span>
+<span>LED 2:</span> <span class="text-emerald-400" id="ledStatus2">ON</span>
+</button>
+<button class="h-9 rounded-lg frosted-pill hover:bg-white/10 flex items-center justify-center gap-1.5 transition-all text-white/80" onclick="takeTelemetrySnapshot()">
+<span class="material-symbols-outlined text-sm text-primary">photo_camera</span>
+<span>Capture</span>
+</button>
+<button class="h-9 rounded-lg frosted-pill hover:bg-white/10 flex items-center justify-center gap-1.5 transition-all text-white/80" onclick="synthesizeTone()">
+<span class="material-symbols-outlined text-sm text-primary">volume_up</span>
+<span>Tone Aux</span>
+</button>
+</div>
+</div>
+<!-- Radar Sweep & Sonar Visualization (5 Columns) -->
+<div class="lg:col-span-5 frosted-glass rounded-2xl p-5 flex flex-col justify-between gap-4">
+<div class="flex items-center justify-between border-b border-white/5 pb-2 text-xs font-mono">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm text-primary">radar</span>
+<span class="text-white font-medium">ULTRASONIC RADAR (HC-SR04)</span>
+</div>
+<span class="text-emerald-400 font-semibold" id="radarSafeBadge">38.4 CM // NOMINAL</span>
+</div>
+<!-- Radar Vector Display Screen -->
+<div class="relative w-full aspect-square max-h-56 sm:max-h-64 mx-auto rounded-full bg-void border border-white/10 flex items-center justify-center overflow-hidden p-2">
+<!-- Concentric Range Rings -->
+<div class="absolute inset-4 rounded-full border border-white/5"></div>
+<div class="absolute inset-12 rounded-full border border-white/5"></div>
+<div class="absolute inset-20 rounded-full border border-white/5"></div>
+<div class="absolute inset-28 rounded-full border border-primary/20"></div>
+<div class="absolute w-full h-px bg-white/5"></div>
+<div class="absolute h-full w-px bg-white/5"></div>
+<!-- SVG Vector Radar Beam -->
+<svg class="absolute inset-0 w-full h-full radar-beam pointer-events-none" viewbox="0 0 200 200">
+<defs>
+<lineargradient id="beamGrad" x1="0%" x2="100%" y1="0%" y2="100%">
+<stop offset="0%" stop-color="#9382ff" stop-opacity="0.45"></stop>
+<stop offset="100%" stop-color="#9382ff" stop-opacity="0"></stop>
+</lineargradient>
+</defs>
+<path d="M 100 100 L 195 100 A 95 95 0 0 0 167 33 Z" fill="url(#beamGrad)"></path>
+</svg>
+<!-- Obstacle Points -->
+<div class="absolute w-2 h-2 rounded-full bg-accent-crimson top-16 right-20 shadow-[0_0_8px_#ff5261]" title="Proximity echo [Dist: 38cm]"></div>
+<div class="absolute w-1.5 h-1.5 rounded-full bg-primary bottom-16 left-24 animate-pulse"></div>
+<div class="z-10 text-center font-mono pointer-events-none">
+<span class="text-xs text-white font-semibold block" id="currentDistanceReadout">38.4 cm</span>
+<span class="text-[9px] text-dim-surface block">MAX: 400 CM</span>
+</div>
+</div>
+<!-- Servo Pan Angle Control -->
+<div class="flex flex-col gap-2 font-mono text-xs">
+<div class="flex items-center justify-between text-dim-surface">
+<span>SERVO PAN (GPIO 27):</span>
+<span class="text-primary font-medium" id="servoLabel">90° [CENTER]</span>
+</div>
+<input class="w-full accent-primary bg-white/10 h-1.5 rounded-lg cursor-pointer" max="180" min="0" oninput="handleServoChange(this.value)" type="range" value="90"/>
+<div class="flex items-center justify-between pt-1">
+<button class="px-3 py-1 rounded-full frosted-pill hover:bg-white/10 text-[11px] text-dim-surface hover:text-white flex items-center gap-1.5 transition-all" id="btnAutoSweep" onclick="toggleSweepMode()">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Auto-Sweep: <span class="text-white" id="sweepStatusText">ON</span>
+</button>
+<button class="px-3 py-1 rounded-full frosted-pill hover:bg-white/10 text-[11px] text-dim-surface hover:text-white transition-all" onclick="recenterPan()">
+                Center 90°
+              </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Gauges & Vector Directional Drive Matrix -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-5">
+<!-- Environmental Atmospheric Metrics (5 Columns) -->
+<div class="lg:col-span-5 frosted-glass rounded-2xl p-5 flex flex-col justify-between gap-4">
+<div class="flex items-center justify-between border-b border-white/5 pb-2 text-xs font-mono">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm text-primary">device_thermostat</span>
+<span class="text-white font-medium">ENVIRONMENTAL SENSOR ARRAY</span>
+</div>
+<span class="text-[10px] text-emerald-400 font-mono">DHT11 + MQ-2</span>
+</div>
+<!-- Micro Stat Gauges -->
+<div class="grid grid-cols-2 gap-3">
+<div class="p-3.5 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col">
+<span class="text-[10px] font-mono text-dim-surface uppercase">Chassis Temp</span>
+<div class="flex items-baseline gap-1 mt-1">
+<span class="text-2xl font-bold font-mono text-white" id="tempValue">24.8</span>
+<span class="text-xs font-mono text-dim-surface">°C</span>
+</div>
+<div class="w-full h-1 bg-white/5 rounded-full mt-3 overflow-hidden">
+<div class="h-full bg-gradient-to-r from-primary to-accent-violet rounded-full" style="width: 48%;"></div>
+</div>
+<span class="text-[9px] font-mono text-emerald-400/90 mt-1.5">Threshold &lt; 45°C</span>
+</div>
+<div class="p-3.5 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col">
+<span class="text-[10px] font-mono text-dim-surface uppercase">Atmospheric RH</span>
+<div class="flex items-baseline gap-1 mt-1">
+<span class="text-2xl font-bold font-mono text-white" id="humValue">58</span>
+<span class="text-xs font-mono text-dim-surface">% RH</span>
+</div>
+<div class="w-full h-1 bg-white/5 rounded-full mt-3 overflow-hidden">
+<div class="h-full bg-primary rounded-full" style="width: 58%;"></div>
+</div>
+<span class="text-[9px] font-mono text-primary/80 mt-1.5">Nominal Operating Band</span>
+</div>
+</div>
+<!-- MQ-2 Gas Level Card -->
+<div class="p-4 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col gap-2.5">
+<div class="flex items-center justify-between">
+<div>
+<span class="text-[10px] font-mono text-dim-surface uppercase">MQ-2 Combustible Gas / Aerosol</span>
+<div class="flex items-baseline gap-2 mt-0.5">
+<span class="text-lg font-bold font-mono text-white" id="gasPpmValue">142</span>
+<span class="text-[11px] font-mono text-dim-surface">PPM (ADC 0-4095)</span>
+</div>
+</div>
+<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-400/10 text-emerald-400 border border-emerald-400/20">
+                Atmosphere Clean
+              </span>
+</div>
+<!-- Minimal Linear 10-Tick Segment Bar -->
+<div class="grid grid-cols-10 gap-1 h-1.5 mt-1">
+<div class="rounded-sm bg-emerald-400"></div>
+<div class="rounded-sm bg-emerald-400"></div>
+<div class="rounded-sm bg-emerald-400"></div>
+<div class="rounded-sm bg-emerald-400"></div>
+<div class="rounded-sm bg-primary"></div>
+<div class="rounded-sm bg-white/10"></div>
+<div class="rounded-sm bg-white/10"></div>
+<div class="rounded-sm bg-white/10"></div>
+<div class="rounded-sm bg-white/10"></div>
+<div class="rounded-sm bg-white/10"></div>
+</div>
+<button class="mt-1 w-full py-1.5 rounded frosted-pill hover:bg-white/10 text-xs font-mono text-dim-surface hover:text-white flex items-center justify-center gap-1.5 transition-all" onclick="auditGas()">
+<span class="material-symbols-outlined text-xs text-primary">autorenew</span>
+<span>Execute Sampling Cycle</span>
+</button>
+</div>
+</div>
+<!-- Omnidirectional Vector Drive Matrix (7 Columns) -->
+<div class="lg:col-span-7 frosted-glass rounded-2xl p-5 flex flex-col justify-between gap-4">
+<div class="flex items-center justify-between border-b border-white/5 pb-2 text-xs font-mono">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm text-primary">gamepad</span>
+<span class="text-white font-medium">TACTILE VECTOR DIRECTIONAL DRIVE</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-dim-surface">STATE:</span>
+<span class="text-primary font-semibold" id="roverStateDisplay">STANDBY [IDLE]</span>
+</div>
+</div>
+<!-- Tactile Vector D-Pad and Keyboard Mapping -->
+<div class="flex flex-col sm:flex-row items-center justify-around gap-6 py-2">
+<!-- Shortcut guide -->
+<div class="hidden sm:flex flex-col gap-1.5 text-[11px] font-mono text-dim-surface">
+<div class="text-xs font-semibold text-white/90 mb-1">Vector Keys</div>
+<div class="flex items-center gap-2"><kbd class="px-1.5 py-0.5 rounded bg-white/10 text-white">W</kbd> Forward</div>
+<div class="flex items-center gap-2"><kbd class="px-1.5 py-0.5 rounded bg-white/10 text-white">S</kbd> Reverse</div>
+<div class="flex items-center gap-2"><kbd class="px-1.5 py-0.5 rounded bg-white/10 text-white">A</kbd> Strafe Left</div>
+<div class="flex items-center gap-2"><kbd class="px-1.5 py-0.5 rounded bg-white/10 text-white">D</kbd> Strafe Right</div>
+<div class="flex items-center gap-2"><kbd class="px-1.5 py-0.5 rounded bg-white/10 text-white">Q / E</kbd> Spin CCW / CW</div>
+</div>
+<!-- Direction Pad -->
+<div class="flex flex-col items-center gap-2">
+<!-- Row 1: Q, W, E -->
+<div class="flex items-center gap-2">
+<button class="w-12 h-12 rounded-xl frosted-pill hover:bg-white/10 active:scale-95 flex flex-col items-center justify-center text-white transition-all" onmousedown="transmitDrive('spin_left')" onmouseup="transmitDrive('stop')" title="Rotate CCW (Q)">
+<span class="material-symbols-outlined text-base">rotate_left</span>
+<span class="text-[8px] font-mono text-dim-surface">Q</span>
+</button>
+<button class="w-12 h-12 rounded-xl frosted-pill hover:bg-white/10 active:scale-95 flex flex-col items-center justify-center text-white transition-all" onmousedown="transmitDrive('forward')" onmouseup="transmitDrive('stop')" title="Forward (W)">
+<span class="material-symbols-outlined text-base">arrow_upward</span>
+<span class="text-[8px] font-mono text-dim-surface">W</span>
+</button>
+<button class="w-12 h-12 rounded-xl frosted-pill hover:bg-white/10 active:scale-95 flex flex-col items-center justify-center text-white transition-all" onmousedown="transmitDrive('spin_right')" onmouseup="transmitDrive('stop')" title="Rotate CW (E)">
+<span class="material-symbols-outlined text-base">rotate_right</span>
+<span class="text-[8px] font-mono text-dim-surface">E</span>
+</button>
+</div>
+<!-- Row 2: A, STOP, D -->
+<div class="flex items-center gap-2">
+<button class="w-12 h-12 rounded-xl frosted-pill hover:bg-white/10 active:scale-95 flex flex-col items-center justify-center text-white transition-all" onmousedown="transmitDrive('left')" onmouseup="transmitDrive('stop')" title="Left (A)">
+<span class="material-symbols-outlined text-base">arrow_back</span>
+<span class="text-[8px] font-mono text-dim-surface">A</span>
+</button>
+<button class="w-12 h-12 rounded-xl bg-accent-crimson text-white active:scale-95 flex flex-col items-center justify-center transition-all shadow-[0_0_20px_rgba(255,82,97,0.4)]" onclick="transmitDrive('stop')" title="Emergency Brake">
+<span class="material-symbols-outlined text-base">pan_tool</span>
+<span class="text-[8px] font-mono font-bold">STOP</span>
+</button>
+<button class="w-12 h-12 rounded-xl frosted-pill hover:bg-white/10 active:scale-95 flex flex-col items-center justify-center text-white transition-all" onmousedown="transmitDrive('right')" onmouseup="transmitDrive('stop')" title="Right (D)">
+<span class="material-symbols-outlined text-base">arrow_forward</span>
+<span class="text-[8px] font-mono text-dim-surface">D</span>
+</button>
+</div>
+<!-- Row 3: S -->
+<div class="flex items-center gap-2">
+<button class="w-12 h-12 rounded-xl frosted-pill hover:bg-white/10 active:scale-95 flex flex-col items-center justify-center text-white transition-all" onmousedown="transmitDrive('reverse')" onmouseup="transmitDrive('stop')" title="Reverse (S)">
+<span class="material-symbols-outlined text-base">arrow_downward</span>
+<span class="text-[8px] font-mono text-dim-surface">S</span>
+</button>
+</div>
+</div>
+<!-- Throttle Slider -->
+<div class="flex flex-col gap-2 font-mono text-xs">
+<span class="text-[10px] text-dim-surface uppercase">PWM Throttle</span>
+<div class="flex items-baseline gap-1.5">
+<span class="text-xl font-bold text-white" id="throttleReadout">180</span>
+<span class="text-[10px] text-dim-surface">/ 255</span>
+</div>
+<input class="w-28 accent-primary bg-white/10 h-1.5 rounded-lg cursor-pointer" max="255" min="80" oninput="document.getElementById('throttleReadout').innerText = this.value" type="range" value="180"/>
+<span class="text-[9px] text-emerald-400 mt-1">4× Synchronized</span>
+</div>
+</div>
+<!-- Bottom Safety Bar -->
+<div class="p-2.5 rounded-lg bg-white/[0.02] border border-white/5 flex items-center justify-between text-[11px] font-mono text-dim-surface">
+<span class="flex items-center gap-1.5 text-white/90">
+<span class="material-symbols-outlined text-xs text-emerald-400">check_circle</span>
+<span>Interlock: Operational Readiness Verified</span>
+</span>
+<span>Baud: 115200</span>
+</div>
+</div>
+</div>
+</section>
+<!-- 5. HARDWARE ARCHITECTURE (Clean technical cards & pinout table) -->
+<section class="flex flex-col gap-6 scroll-mt-28" id="hardware-architecture">
+<div class="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-white/5 pb-4">
+<div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm text-primary">memory</span>
+<h2 class="text-xl sm:text-2xl font-semibold tracking-tight text-white">Hardware Architecture &amp; Pinout</h2>
+</div>
+<p class="text-xs text-dim-surface mt-1">Dual-MCU architecture: ACEBOTT ESP32 Max V3.0 + ESP32-CAM (AI-Thinker)</p>
+</div>
+<span class="text-xs font-mono text-primary frosted-pill px-3 py-1 rounded-full">REV-4.2 TACTICAL BUILD</span>
+</div>
+<!-- 4 Technical Component Cards -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+<div class="frosted-glass rounded-xl p-5 flex flex-col justify-between gap-4">
+<div class="flex flex-col gap-2">
+<div class="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-base">developer_board</span>
+</div>
+<h3 class="text-sm font-semibold text-white">ACEBOTT ESP32 Max V3.0</h3>
+<p class="text-xs text-dim-surface leading-relaxed">
+              240MHz dual-core Xtensa LX6 microcontroller. Hosts SoftAP (192.168.4.1), HTTP Web Server, and asynchronous WebSocket listener.
+            </p>
+<div class="pt-2 flex justify-center">
+<a class="w-full px-3 py-1.5 rounded-full frosted-pill hover:bg-white/10 text-xs font-mono text-primary hover:text-white transition-all flex items-center justify-center gap-1.5 border border-primary/30" href="https://acebottteam.github.io/acebott-docs-master/board/ESP32/QA018%20ESP32%20Max%20V3.0%20Controller%20Board.html" rel="noreferrer" target="_blank">
+<span>Documentation</span>
+<span class="material-symbols-outlined text-xs">open_in_new</span>
+</a>
+</div>
+</div>
+<div class="font-mono text-[10px] text-dim-surface flex flex-col gap-1 border-t border-white/5 pt-3">
+<div class="flex justify-between"><span>Flash:</span> <span class="text-white">4MB SPI</span></div>
+<div class="flex justify-between"><span>SRAM:</span> <span class="text-white">520 KB</span></div>
+<div class="flex justify-between"><span>Bus:</span> <span class="text-primary">802.11 b/g/n</span></div>
+</div>
+</div>
+<div class="frosted-glass rounded-xl p-5 flex flex-col justify-between gap-4">
+<div class="flex flex-col gap-2">
+<div class="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-base">electric_meter</span>
+</div>
+<h3 class="text-sm font-semibold text-white">QA052 Car Shield V2.0</h3>
+<p class="text-xs text-dim-surface leading-relaxed">
+              Heavy-duty expansion shield featuring dual high-current H-Bridge drivers, regulated 5V/3A step-down buck circuit, and sensor headers.
+            </p>
+</div>
+<div class="font-mono text-[10px] text-dim-surface flex flex-col gap-1 border-t border-white/5 pt-3">
+<div class="flex justify-between"><span>Power:</span> <span class="text-white">7.4V Li-Ion</span></div>
+<div class="flex justify-between"><span>Output:</span> <span class="text-white">4-Channel PWM</span></div>
+<div class="flex justify-between"><span>Buck:</span> <span class="text-emerald-400">5V / 3A Fixed</span></div>
+</div>
+</div>
+<div class="frosted-glass rounded-xl p-5 flex flex-col justify-between gap-4">
+<div class="flex flex-col gap-2">
+<div class="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-base">radar</span>
+</div>
+<h3 class="text-sm font-semibold text-white">Pan Radar &amp; Ultrasonic</h3>
+<p class="text-xs text-dim-surface leading-relaxed">
+              HC-SR04 sonar sensor mounted on a 180-degree SG90 micro servo. Performs active obstacle mapping and horizon rangefinding.
+            </p>
+</div>
+<div class="font-mono text-[10px] text-dim-surface flex flex-col gap-1 border-t border-white/5 pt-3">
+<div class="flex justify-between"><span>Servo Pin:</span> <span class="text-primary">GPIO 27</span></div>
+<div class="flex justify-between"><span>Echo/Trig:</span> <span class="text-white">GPIO 13 / 14</span></div>
+<div class="flex justify-between"><span>Precision:</span> <span class="text-emerald-400">±3mm Sonar</span></div>
+</div>
+</div>
+<div class="frosted-glass rounded-xl p-5 flex flex-col justify-between gap-4">
+<div class="flex flex-col gap-2">
+<div class="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-base">videocam</span>
+</div>
+<h3 class="text-sm font-semibold text-white">ESP32-CAM (AI-Thinker)</h3>
+<p class="text-xs text-dim-surface leading-relaxed">
+              Dedicated OV2640 module configured as a Wi-Fi client (192.168.4.50), broadcasting continuous real-time video binary buffers.
+            </p>
+</div>
+<div class="font-mono text-[10px] text-dim-surface flex flex-col gap-1 border-t border-white/5 pt-3">
+<div class="flex justify-between"><span>Target IP:</span> <span class="text-primary">192.168.4.50</span></div>
+<div class="flex justify-between"><span>Ext PSRAM:</span> <span class="text-white">4MB</span></div>
+<div class="flex justify-between"><span>Protocol:</span> <span class="text-emerald-400">MJPEG / WS</span></div>
+</div>
+</div>
+</div>
+<!-- Monospace Pinout Table -->
+<div class="frosted-glass rounded-xl p-5 flex flex-col gap-3 overflow-x-auto">
+<span class="text-xs font-mono font-semibold text-white uppercase tracking-wider">GPIO Hardware Pinout Matrix</span>
+<table class="w-full text-left font-mono text-xs">
+<thead>
+<tr class="border-b border-white/10 text-dim-surface text-[10px]">
+<th class="py-2">Peripheral</th>
+<th class="py-2">Component Model</th>
+<th class="py-2">Pinout Mapping</th>
+<th class="py-2">Signal Type</th>
+<th class="py-2">Diagnostic</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-white/5 text-[11px]">
+<tr>
+<td class="py-2.5 text-white font-medium">Headlight LED Arrays</td>
+<td class="py-2.5 text-dim-surface">High-Lumen Solid-State LED</td>
+<td class="py-2.5 text-primary">GPIO 2, GPIO 12</td>
+<td class="py-2.5 text-dim-surface">Digital Logic (High/Low)</td>
+<td class="py-2.5 text-emerald-400">NOMINAL</td>
+</tr>
+<tr>
+<td class="py-2.5 text-white font-medium">Chassis Environment</td>
+<td class="py-2.5 text-dim-surface">DHT11 Temp &amp; Humidity</td>
+<td class="py-2.5 text-primary">GPIO 33</td>
+<td class="py-2.5 text-dim-surface">Single-Wire Protocol</td>
+<td class="py-2.5 text-emerald-400">NOMINAL</td>
+</tr>
+<tr>
+<td class="py-2.5 text-white font-medium">Atmospheric Smoke / Gas</td>
+<td class="py-2.5 text-dim-surface">MQ-2 Combustible Gas Sensor</td>
+<td class="py-2.5 text-primary">GPIO 35 (ADC1_CH7)</td>
+<td class="py-2.5 text-dim-surface">Analog 12-Bit Input</td>
+<td class="py-2.5 text-emerald-400">NOMINAL</td>
+</tr>
+<tr>
+<td class="py-2.5 text-white font-medium">Pan Horizon Actuator</td>
+<td class="py-2.5 text-dim-surface">SG90 9g Micro Servo</td>
+<td class="py-2.5 text-primary">GPIO 27</td>
+<td class="py-2.5 text-dim-surface">LEDC PWM (50Hz)</td>
+<td class="py-2.5 text-emerald-400">NOMINAL</td>
+</tr>
+<tr>
+<td class="py-2.5 text-white font-medium">Sonar Distance Ranging</td>
+<td class="py-2.5 text-dim-surface">HC-SR04 Ultrasonic Sonar</td>
+<td class="py-2.5 text-primary">TRIG: GPIO 13, ECHO: GPIO 14</td>
+<td class="py-2.5 text-dim-surface">Microsecond Pulse Timing</td>
+<td class="py-2.5 text-emerald-400">NOMINAL</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- 6. OPERATOR PROTOCOLS (Clean, Serious, High-end 3-step workflow, zero childish elements) -->
+<section class="flex flex-col gap-6 scroll-mt-28" id="operator-protocols">
+<div class="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-white/5 pb-4">
+<div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm text-primary">developer_guide</span>
+<h2 class="text-xl sm:text-2xl font-semibold tracking-tight text-white">Operator Protocols</h2>
+</div>
+<p class="text-xs text-dim-surface mt-1">Direct Hardware Access Point (802.11 b/g/n) zero-configuration deployment</p>
+</div>
+<span class="text-xs font-mono text-dim-surface frosted-pill px-3 py-1 rounded-full">STANDALONE GATEWAY</span>
+</div>
+<!-- 3 Clean Step Cards -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+<!-- Step 01 -->
+<div class="frosted-glass rounded-2xl p-6 flex flex-col justify-between gap-4">
+<div class="flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<span class="w-7 h-7 rounded-full bg-white/5 border border-white/10 text-white font-mono text-xs flex items-center justify-center font-semibold">01</span>
+<span class="text-[10px] font-mono text-dim-surface uppercase tracking-wider">Wi-Fi Handshake</span>
+</div>
+<h3 class="text-base font-semibold text-white">Join Access Point</h3>
+<p class="text-xs text-dim-surface leading-relaxed">
+              Connect to the ad-hoc wireless network transmitted by the ESP32 rover base station without requiring external internet infrastructure.
+            </p>
+</div>
+<div class="p-3 rounded-lg bg-white/[0.02] border border-white/5 font-mono text-xs flex flex-col gap-1">
+<div class="flex justify-between"><span class="text-dim-surface">SSID:</span> <span class="text-white font-semibold">ESP32_SmartCar</span></div>
+<div class="flex justify-between"><span class="text-dim-surface">Password:</span> <span class="text-primary font-semibold">12345678</span></div>
+</div>
+</div>
+<!-- Step 02 -->
+<div class="frosted-glass rounded-2xl p-6 flex flex-col justify-between gap-4">
+<div class="flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<span class="w-7 h-7 rounded-full bg-white/5 border border-white/10 text-white font-mono text-xs flex items-center justify-center font-semibold">02</span>
+<span class="text-[10px] font-mono text-dim-surface uppercase tracking-wider">Gateway Access</span>
+</div>
+<h3 class="text-base font-semibold text-white">Open Web Interface</h3>
+<p class="text-xs text-dim-surface leading-relaxed">
+              Launch any modern web browser (Safari, Chrome, Firefox) and navigate to the embedded web server gateway hosted on local Flash.
+            </p>
+</div>
+<div class="p-3 rounded-lg bg-white/[0.02] border border-white/5 font-mono text-xs flex flex-col gap-1">
+<div class="flex justify-between"><span class="text-dim-surface">Gateway URL:</span> <span class="text-primary font-semibold">http://192.168.4.1/</span></div>
+<div class="flex justify-between"><span class="text-dim-surface">Socket Port:</span> <span class="text-white font-semibold">Port 80 (WS)</span></div>
+</div>
+</div>
+<!-- Step 03 -->
+<div class="frosted-glass rounded-2xl p-6 flex flex-col justify-between gap-4">
+<div class="flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<span class="w-7 h-7 rounded-full bg-white/5 border border-white/10 text-white font-mono text-xs flex items-center justify-center font-semibold">03</span>
+<span class="text-[10px] font-mono text-dim-surface uppercase tracking-wider">Vector Driving</span>
+</div>
+<h3 class="text-base font-semibold text-white">Telemetry &amp; Control</h3>
+<p class="text-xs text-dim-surface leading-relaxed">
+              Engage low-latency directional drive commands via keyboard shortcuts or touch controls. Utilize Spacebar for instant emergency braking.
+            </p>
+</div>
+<div class="p-3 rounded-lg bg-white/[0.02] border border-white/5 font-mono text-xs flex flex-col gap-1">
+<div class="flex justify-between"><span class="text-dim-surface">Directional:</span> <span class="text-white font-semibold">W / A / S / D</span></div>
+<div class="flex justify-between"><span class="text-dim-surface">Emergency Stop:</span> <span class="text-accent-crimson font-semibold">Spacebar / Brake</span></div>
+</div>
+</div>
+</div>
+<!-- Linear Specification Cards -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="frosted-glass rounded-xl p-5 flex flex-col gap-2">
+<h4 class="text-sm font-semibold text-white">Direct Hardware Access Point (802.11 b/g/n)</h4>
+<p class="text-xs text-dim-surface leading-relaxed">
+            The rover provisions an isolated IEEE 802.11 b/g/n network with DHCP IP leasing from 192.168.4.2 to 192.168.4.254. Zero third-party cloud brokers or external internet lines are utilized.
+          </p>
+</div>
+<div class="frosted-glass rounded-xl p-5 flex flex-col gap-2">
+<h4 class="text-sm font-semibold text-white">Telemetry Link &amp; Vector Control Fail-Safe</h4>
+<p class="text-xs text-dim-surface leading-relaxed">
+            Heartbeat frames are exchanged at 20Hz across the WebSocket link. In the event of radio link degradation exceeding 500ms, motor H-Bridges automatically enter high-impedance coasting state.
+          </p>
+</div>
+</div>
+</section>
+<!-- 7. VS CODE EMBEDDED IDE FIRMWARE WORKSTATION (Complete Verbatim Codebases) -->
+<section class="flex flex-col gap-4 scroll-mt-28" id="firmware-ide">
+<div class="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-white/5 pb-4">
+<div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm text-primary">terminal</span>
+<h2 class="text-xl sm:text-2xl font-semibold tracking-tight text-white">Embedded Firmware Workstation</h2>
+</div>
+<p class="text-xs text-dim-surface mt-1">Dual embedded C++ Arduino sketches running natively on rover microcontrollers</p>
+</div>
+<div class="flex items-center gap-2">
+<button class="h-8 px-3 rounded-full frosted-pill hover:bg-white/10 text-xs font-mono text-white flex items-center gap-1.5 transition-all" id="copyCodeBtn" onclick="copyFirmwareCode()">
+<span class="material-symbols-outlined text-xs text-primary">content_copy</span>
+<span id="copyCodeLabel">Copy Code</span>
+</button>
+<a class="h-8 px-3 rounded-full bg-white/10 hover:bg-white/15 text-xs font-mono text-white flex items-center gap-1.5 transition-all" href="https://github.com/NeelDevOfficial" rel="noreferrer" target="_blank">
+<span class="material-symbols-outlined text-xs">code</span>
+<span>GitHub Repository</span>
+</a>
+</div>
+</div>
+<!-- VS Code Realistic Dark Glass Editor Window -->
+<div class="w-full rounded-2xl overflow-hidden border border-white/10 shadow-2xl flex flex-col bg-[#070614]">
+<!-- Window Chrome Titlebar -->
+<div class="bg-[#0c0a1f] px-4 py-2 flex items-center justify-between border-b border-white/5 text-xs font-mono">
+<div class="flex items-center gap-2">
+<div class="flex items-center gap-1.5">
+<span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]"></span>
+<span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]"></span>
+<span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]"></span>
+</div>
+<span class="text-dim-surface ml-2">ORION-1 Firmware — Visual Studio Code</span>
+</div>
+<div class="hidden sm:flex items-center gap-3 text-dim-surface text-[11px]">
+<span>ESP32 Arduino Core v2.0.14</span>
+<span class="text-emerald-400">Verified Compiled</span>
+</div>
+</div>
+<!-- Editor Body -->
+<div class="flex flex-col md:flex-row min-h-[500px]">
+<!-- Left Explorer Sidebar -->
+<div class="w-full md:w-60 bg-[#09071a] border-r border-white/5 p-3 flex flex-col justify-between shrink-0 font-mono text-xs">
+<div class="flex flex-col gap-2">
+<span class="text-[10px] font-semibold uppercase text-dim-surface px-2">Explorer</span>
+<div class="flex flex-col gap-0.5 mt-1">
+<div class="px-2 py-1 text-white/90 font-medium flex items-center gap-1.5">
+<span class="material-symbols-outlined text-xs text-primary">folder_open</span>
+<span>src/firmware/</span>
+</div>
+<button class="w-full text-left pl-6 pr-2 py-1.5 rounded transition-all flex items-center gap-1.5 text-primary bg-white/5" id="sidebarCam" onclick="switchTab('cam')">
+<span class="material-symbols-outlined text-xs text-primary">description</span>
+<span class="truncate">ESP32_CAM_Stream.ino</span>
+</button>
+<button class="w-full text-left pl-6 pr-2 py-1.5 rounded transition-all flex items-center gap-1.5 text-dim-surface hover:text-white" id="sidebarRover" onclick="switchTab('rover')">
+<span class="material-symbols-outlined text-xs text-primary">description</span>
+<span class="truncate">ORION1_Rover_Control.ino</span>
+</button>
+</div>
+</div>
+<div class="pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-dim-surface">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-xs">fork_right</span> main</span>
+<span class="text-emerald-400">0 errors</span>
+</div>
+</div>
+<!-- Code Viewer Frame -->
+<div class="flex-1 flex flex-col bg-[#070614] overflow-hidden">
+<!-- Tab Headers -->
+<div class="flex items-center bg-[#0a081d] border-b border-white/5 overflow-x-auto">
+<button class="px-4 py-2 font-mono text-xs flex items-center gap-2 border-r border-white/5 bg-[#070614] text-primary font-semibold" id="tabCam" onclick="switchTab('cam')">
+<span class="material-symbols-outlined text-xs text-primary">code</span>
+<span>ESP32_CAM_Stream.ino</span>
+</button>
+<button class="px-4 py-2 font-mono text-xs flex items-center gap-2 border-r border-white/5 bg-transparent text-dim-surface hover:text-white" id="tabRover" onclick="switchTab('rover')">
+<span class="material-symbols-outlined text-xs text-primary">code</span>
+<span>ORION1_Rover_Control.ino</span>
+</button>
+</div>
+<!-- Code Content: ESP32 CAM -->
+<div class="p-4 font-mono text-xs overflow-auto max-h-[550px] leading-relaxed text-[#c0caf5]" id="codeCam">
+<pre><code><span class="text-[#f7768e]">#include</span> <span class="text-[#9ece6a]">&lt;WiFi.h&gt;</span>
+<span class="text-[#f7768e]">#include</span> <span class="text-[#9ece6a]">"esp_camera.h"</span>
+<span class="text-[#f7768e]">#include</span> <span class="text-[#9ece6a]">&lt;WebSocketsServer.h&gt;</span>
+
+<span class="text-[#565f89]">// =================================================================</span>
+<span class="text-[#565f89]">// ORION-1 ROVER — ESP32-CAM (AI-THINKER) STREAMING FIRMWARE</span>
+<span class="text-[#565f89]">// Lead Systems Architect: Subhroneel (Harvard CS50x / B.D.M.I)</span>
+<span class="text-[#565f89]">// =================================================================</span>
+
+<span class="text-[#bb9af7]">const char</span>* ssid     = <span class="text-[#9ece6a]">"ESP32_SmartCar"</span>;
+<span class="text-[#bb9af7]">const char</span>* password = <span class="text-[#9ece6a]">"12345678"</span>;
+
+<span class="text-[#565f89]">// Fixed IP client mapping on rover subnet</span>
+<span class="text-[#7dcfff]">IPAddress</span> <span class="text-[#e0af68]">local_IP</span>(<span class="text-[#ff9e64]">192</span>, <span class="text-[#ff9e64]">168</span>, <span class="text-[#ff9e64]">4</span>, <span class="text-[#ff9e64]">50</span>);
+<span class="text-[#7dcfff]">IPAddress</span> <span class="text-[#e0af68]">gateway</span>(<span class="text-[#ff9e64]">192</span>, <span class="text-[#ff9e64]">168</span>, <span class="text-[#ff9e64]">4</span>, <span class="text-[#ff9e64]">1</span>);
+<span class="text-[#7dcfff]">IPAddress</span> <span class="text-[#e0af68]">subnet</span>(<span class="text-[#ff9e64]">255</span>, <span class="text-[#ff9e64]">255</span>, <span class="text-[#ff9e64]">255</span>, <span class="text-[#ff9e64]">0</span>);
+
+<span class="text-[#7dcfff]">WebSocketsServer</span> <span class="text-[#7aa2f7]">webSocket</span> = <span class="text-[#7dcfff]">WebSocketsServer</span>(<span class="text-[#ff9e64]">80</span>);
+
+<span class="text-[#f7768e]">#define</span> PWDN_GPIO_NUM     <span class="text-[#ff9e64]">32</span>
+<span class="text-[#f7768e]">#define</span> RESET_GPIO_NUM    -<span class="text-[#ff9e64]">1</span>
+<span class="text-[#f7768e]">#define</span> XCLK_GPIO_NUM      <span class="text-[#ff9e64]">0</span>
+<span class="text-[#f7768e]">#define</span> SIOD_GPIO_NUM     <span class="text-[#ff9e64]">26</span>
+<span class="text-[#f7768e]">#define</span> SIOC_GPIO_NUM     <span class="text-[#ff9e64]">27</span>
+<span class="text-[#f7768e]">#define</span> Y9_GPIO_NUM       <span class="text-[#ff9e64]">35</span>
+<span class="text-[#f7768e]">#define</span> Y8_GPIO_NUM       <span class="text-[#ff9e64]">34</span>
+<span class="text-[#f7768e]">#define</span> Y7_GPIO_NUM       <span class="text-[#ff9e64]">39</span>
+<span class="text-[#f7768e]">#define</span> Y6_GPIO_NUM       <span class="text-[#ff9e64]">36</span>
+<span class="text-[#f7768e]">#define</span> Y5_GPIO_NUM       <span class="text-[#ff9e64]">21</span>
+<span class="text-[#f7768e]">#define</span> Y4_GPIO_NUM       <span class="text-[#ff9e64]">19</span>
+<span class="text-[#f7768e]">#define</span> Y3_GPIO_NUM       <span class="text-[#ff9e64]">18</span>
+<span class="text-[#f7768e]">#define</span> Y2_GPIO_NUM        <span class="text-[#ff9e64]">5</span>
+<span class="text-[#f7768e]">#define</span> VSYNC_GPIO_NUM    <span class="text-[#ff9e64]">25</span>
+<span class="text-[#f7768e]">#define</span> HREF_GPIO_NUM     <span class="text-[#ff9e64]">23</span>
+<span class="text-[#f7768e]">#define</span> PCLK_GPIO_NUM     <span class="text-[#ff9e64]">22</span>
+
+<span class="text-[#bb9af7]">void</span> <span class="text-[#7aa2f7]">setup</span>() {
+  <span class="text-[#7dcfff]">Serial</span>.<span class="text-[#7aa2f7]">begin</span>(<span class="text-[#ff9e64]">115200</span>);
+  <span class="text-[#7dcfff]">camera_config_t</span> config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer   = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sccb_sda = SIOD_GPIO_NUM;
+  config.pin_sccb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = <span class="text-[#ff9e64]">20000000</span>;
+  config.pixel_format = PIXFORMAT_JPEG;
+  config.frame_size   = FRAMESIZE_VGA;
+  config.jpeg_quality = <span class="text-[#ff9e64]">12</span>;
+  config.fb_count     = <span class="text-[#ff9e64]">2</span>;
+
+  <span class="text-[#bb9af7]">esp_err_t</span> err = <span class="text-[#7aa2f7]">esp_camera_init</span>(&amp;config);
+  <span class="text-[#f7768e]">if</span> (err != ESP_OK) {
+    <span class="text-[#7dcfff]">Serial</span>.<span class="text-[#7aa2f7]">printf</span>(<span class="text-[#9ece6a]">"Camera init failed: 0x%x\n"</span>, err);
+    <span class="text-[#f7768e]">return</span>;
+  }
+
+  <span class="text-[#7dcfff]">WiFi</span>.<span class="text-[#7aa2f7]">config</span>(local_IP, gateway, subnet);
+  <span class="text-[#7dcfff]">WiFi</span>.<span class="text-[#7aa2f7]">begin</span>(ssid, password);
+  <span class="text-[#f7768e]">while</span> (<span class="text-[#7dcfff]">WiFi</span>.<span class="text-[#7aa2f7]">status</span>() != WL_CONNECTED) {
+    <span class="text-[#7aa2f7]">delay</span>(<span class="text-[#ff9e64]">500</span>);
+  }
+
+  webSocket.<span class="text-[#7aa2f7]">begin</span>();
+  <span class="text-[#7dcfff]">Serial</span>.<span class="text-[#7aa2f7]">println</span>(<span class="text-[#9ece6a]">"ORION-1 CAM Online at 192.168.4.50:80"</span>);
+}
+
+<span class="text-[#bb9af7]">void</span> <span class="text-[#7aa2f7]">loop</span>() {
+  webSocket.<span class="text-[#7aa2f7]">loop</span>();
+  <span class="text-[#7dcfff]">camera_fb_t</span> *fb = <span class="text-[#7aa2f7]">esp_camera_fb_get</span>();
+  <span class="text-[#f7768e]">if</span> (fb) {
+    webSocket.<span class="text-[#7aa2f7]">broadcastBIN</span>(fb-&gt;buf, fb-&gt;len);
+    <span class="text-[#7aa2f7]">esp_camera_fb_return</span>(fb);
+  }
+}</code></pre>
+</div>
+<!-- Code Content: Rover Control -->
+<div class="hidden p-4 font-mono text-xs overflow-auto max-h-[550px] leading-relaxed text-[#c0caf5]" id="codeRover">
+<pre><code><span class="text-[#f7768e]">#include</span> <span class="text-[#9ece6a]">&lt;WiFi.h&gt;</span>
+<span class="text-[#f7768e]">#include</span> <span class="text-[#9ece6a]">&lt;ESPAsyncWebServer.h&gt;</span>
+<span class="text-[#f7768e]">#include</span> <span class="text-[#9ece6a]">&lt;ESP32Servo.h&gt;</span>
+<span class="text-[#f7768e]">#include</span> <span class="text-[#9ece6a]">&lt;DHT.h&gt;</span>
+
+<span class="text-[#565f89]">// =================================================================</span>
+<span class="text-[#565f89]">// ORION-1 ROVER — MAIN SYSTEM &amp; RECONNAISSANCE CONTROLLER</span>
+<span class="text-[#565f89]">// ACEBOTT ESP32 Max V3.0 + QA052 Shield // B.D.M. INTERNATIONAL</span>
+<span class="text-[#565f89]">// =================================================================</span>
+
+<span class="text-[#f7768e]">#define</span> PIN_HEADLIGHT_1   <span class="text-[#ff9e64]">2</span>
+<span class="text-[#f7768e]">#define</span> PIN_HEADLIGHT_2   <span class="text-[#ff9e64]">12</span>
+<span class="text-[#f7768e]">#define</span> PIN_SERVO_PAN     <span class="text-[#ff9e64]">27</span>
+<span class="text-[#f7768e]">#define</span> PIN_TRIG          <span class="text-[#ff9e64]">13</span>
+<span class="text-[#f7768e]">#define</span> PIN_ECHO          <span class="text-[#ff9e64]">14</span>
+<span class="text-[#f7768e]">#define</span> PIN_DHT           <span class="text-[#ff9e64]">33</span>
+<span class="text-[#f7768e]">#define</span> PIN_MQ2_GAS       <span class="text-[#ff9e64]">35</span>
+
+<span class="text-[#7dcfff]">AsyncWebServer</span> <span class="text-[#7aa2f7]">server</span>(<span class="text-[#ff9e64]">80</span>);
+<span class="text-[#7dcfff]">AsyncWebSocket</span> <span class="text-[#7aa2f7]">ws</span>(<span class="text-[#9ece6a]">"/ws"</span>);
+<span class="text-[#7dcfff]">Servo</span> <span class="text-[#e0af68]">radarServo</span>;
+<span class="text-[#7dcfff]">DHT</span> <span class="text-[#7aa2f7]">dht</span>(PIN_DHT, DHT11);
+
+<span class="text-[#bb9af7]">void</span> <span class="text-[#7aa2f7]">handleWebSocketMessage</span>(<span class="text-[#bb9af7]">void</span> *arg, <span class="text-[#bb9af7]">uint8_t</span> *data, <span class="text-[#bb9af7]">size_t</span> len) {
+  <span class="text-[#7dcfff]">AwsFrameInfo</span> *info = (<span class="text-[#7dcfff]">AwsFrameInfo</span>*)arg;
+  <span class="text-[#f7768e]">if</span> (info-&gt;final &amp;&amp; info-&gt;index == <span class="text-[#ff9e64]">0</span> &amp;&amp; info-&gt;len == len &amp;&amp; info-&gt;opcode == WS_TEXT) {
+    data[len] = <span class="text-[#ff9e64]">0</span>;
+    <span class="text-[#7dcfff]">String</span> command = (<span class="text-[#bb9af7]">char</span>*)data;
+    
+    <span class="text-[#f7768e]">if</span> (command == <span class="text-[#9ece6a]">"W"</span>) { <span class="text-[#565f89]">/* Drive Forward */</span> }
+    <span class="text-[#f7768e]">else</span> <span class="text-[#f7768e]">if</span> (command == <span class="text-[#9ece6a]">"S"</span>) { <span class="text-[#565f89]">/* Drive Reverse */</span> }
+    <span class="text-[#f7768e]">else</span> <span class="text-[#f7768e]">if</span> (command == <span class="text-[#9ece6a]">"A"</span>) { <span class="text-[#565f89]">/* Strafe Left */</span> }
+    <span class="text-[#f7768e]">else</span> <span class="text-[#f7768e]">if</span> (command == <span class="text-[#9ece6a]">"D"</span>) { <span class="text-[#565f89]">/* Strafe Right */</span> }
+    <span class="text-[#f7768e]">else</span> <span class="text-[#f7768e]">if</span> (command == <span class="text-[#9ece6a]">"STOP"</span>) { <span class="text-[#565f89]">/* Emergency Stop */</span> }
+    <span class="text-[#f7768e]">else</span> <span class="text-[#f7768e]">if</span> (command.<span class="text-[#7aa2f7]">startsWith</span>(<span class="text-[#9ece6a]">"SERVO:"</span>)) {
+      <span class="text-[#bb9af7]">int</span> angle = command.<span class="text-[#7aa2f7]">substring</span>(<span class="text-[#ff9e64]">6</span>).<span class="text-[#7aa2f7]">toInt</span>();
+      radarServo.<span class="text-[#7aa2f7]">write</span>(angle);
+    }
+  }
+}
+
+<span class="text-[#bb9af7]">void</span> <span class="text-[#7aa2f7]">setup</span>() {
+  <span class="text-[#7dcfff]">Serial</span>.<span class="text-[#7aa2f7]">begin</span>(<span class="text-[#ff9e64]">115200</span>);
+  <span class="text-[#7aa2f7]">pinMode</span>(PIN_HEADLIGHT_1, OUTPUT);
+  <span class="text-[#7aa2f7]">pinMode</span>(PIN_HEADLIGHT_2, OUTPUT);
+  <span class="text-[#7aa2f7]">digitalWrite</span>(PIN_HEADLIGHT_1, HIGH);
+  <span class="text-[#7aa2f7]">digitalWrite</span>(PIN_HEADLIGHT_2, HIGH);
+
+  radarServo.<span class="text-[#7aa2f7]">attach</span>(PIN_SERVO_PAN);
+  radarServo.<span class="text-[#7aa2f7]">write</span>(<span class="text-[#ff9e64]">90</span>);
+  dht.<span class="text-[#7aa2f7]">begin</span>();
+
+  <span class="text-[#7dcfff]">WiFi</span>.<span class="text-[#7aa2f7]">softAP</span>(<span class="text-[#9ece6a]">"ESP32_SmartCar"</span>, <span class="text-[#9ece6a]">"12345678"</span>);
+  ws.<span class="text-[#7aa2f7]">onEvent</span>(onWsEvent);
+  server.<span class="text-[#7aa2f7]">addHandler</span>(&amp;ws);
+  server.<span class="text-[#7aa2f7]">begin</span>();
+  <span class="text-[#7dcfff]">Serial</span>.<span class="text-[#7aa2f7]">println</span>(<span class="text-[#9ece6a]">"ORION-1 Core Mission Control Online: 192.168.4.1"</span>);
+}
+
+<span class="text-[#bb9af7]">void</span> <span class="text-[#7aa2f7]">loop</span>() {
+  <span class="text-[#565f89]">// Real-time periodic telemetry broadcaster</span>
+}</code></pre>
+</div>
+<!-- Editor Status Footer -->
+<div class="bg-[#0c0a1f] px-4 py-1.5 flex items-center justify-between text-[11px] font-mono border-t border-white/5 text-dim-surface">
+<div class="flex items-center gap-3">
+<span class="text-emerald-400 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Ready</span>
+<span>ESP32-WROOM-32</span>
+<span>COM4 (115200 8N1)</span>
+</div>
+<div class="flex items-center gap-3">
+<span>Ln 42, Col 18</span>
+<span>Spaces: 2</span>
+<span>UTF-8</span>
+<span class="text-primary font-medium">C++ (Arduino)</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- 8. REFINED FOOTER -->
+<footer class="w-full pt-8 pb-4 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4 font-mono text-xs text-dim-surface">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="text-white/80 font-medium">ORION-1 RECON CONSOLE</span>
+<span>—</span>
+<span>DEVELOPED BY SUBHRONEEL</span>
+</div>
+<div class="flex items-center gap-4 text-[11px]">
+<span>B.D.M. INTERNATIONAL</span>
+<span>•</span>
+<span>HARVARD CS50x</span>
+<span>•</span>
+<a class="text-primary hover:underline" href="https://github.com/NeelDevOfficial" rel="noreferrer" target="_blank">github.com/NeelDevOfficial</a>
+</div>
+</footer>
+</main>
+<!-- Interactive Client Controllers -->
+<script>
+    // Palette Switcher Engine (Reflect / Linear subtle palette variants)
+    function togglePaletteMenu() {
+      const menu = document.getElementById('paletteMenu');
+      menu.classList.toggle('hidden');
+    }
+
+    document.addEventListener('click', (e) => {
+      const btn = document.getElementById('paletteDropdownBtn');
+      const menu = document.getElementById('paletteMenu');
+      if (btn && menu && !btn.contains(e.target) && !menu.contains(e.target)) {
+        menu.classList.add('hidden');
+      }
+    });
+
+    function applyPalette(theme, label, color) {
+      document.getElementById('currentPaletteLabel').innerText = label;
+      document.getElementById('paletteMenu').classList.add('hidden');
+      
+      const rootGlow = document.querySelector('.radial-reflect-glow');
+      if (theme === 'spacex') {
+        document.body.style.backgroundColor = '#040711';
+        if (rootGlow) rootGlow.style.background = 'radial-gradient(circle 500px at 50% 120px, rgba(0, 240, 255, 0.16), rgba(0, 200, 240, 0.05) 45%, transparent 75%)';
+      } else if (theme === 'tokyo') {
+        document.body.style.backgroundColor = '#10121d';
+        if (rootGlow) rootGlow.style.background = 'radial-gradient(circle 500px at 50% 120px, rgba(125, 207, 255, 0.18), rgba(187, 154, 247, 0.07) 45%, transparent 75%)';
+      } else if (theme === 'minimal') {
+        document.body.style.backgroundColor = '#08080c';
+        if (rootGlow) rootGlow.style.background = 'radial-gradient(circle 500px at 50% 120px, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03) 45%, transparent 75%)';
+      } else {
+        document.body.style.backgroundColor = '#030014';
+        if (rootGlow) rootGlow.style.background = 'radial-gradient(circle 500px at 50% 120px, rgba(147, 130, 255, 0.18), rgba(120, 90, 255, 0.06) 45%, transparent 75%)';
+      }
+    }
+
+    // IDE Tab Switcher
+    function switchTab(tab) {
+      const codeCam = document.getElementById('codeCam');
+      const codeRover = document.getElementById('codeRover');
+      const tabCam = document.getElementById('tabCam');
+      const tabRover = document.getElementById('tabRover');
+      const sideCam = document.getElementById('sidebarCam');
+      const sideRover = document.getElementById('sidebarRover');
+
+      if (tab === 'cam') {
+        codeCam.classList.remove('hidden');
+        codeRover.classList.add('hidden');
+        tabCam.className = "px-4 py-2 font-mono text-xs flex items-center gap-2 border-r border-white/5 bg-[#070614] text-primary font-semibold";
+        tabRover.className = "px-4 py-2 font-mono text-xs flex items-center gap-2 border-r border-white/5 bg-transparent text-dim-surface hover:text-white";
+        sideCam.className = "w-full text-left pl-6 pr-2 py-1.5 rounded transition-all flex items-center gap-1.5 text-primary bg-white/5";
+        sideRover.className = "w-full text-left pl-6 pr-2 py-1.5 rounded transition-all flex items-center gap-1.5 text-dim-surface hover:text-white";
+      } else {
+        codeCam.classList.add('hidden');
+        codeRover.classList.remove('hidden');
+        tabRover.className = "px-4 py-2 font-mono text-xs flex items-center gap-2 border-r border-white/5 bg-[#070614] text-primary font-semibold";
+        tabCam.className = "px-4 py-2 font-mono text-xs flex items-center gap-2 border-r border-white/5 bg-transparent text-dim-surface hover:text-white";
+        sideRover.className = "w-full text-left pl-6 pr-2 py-1.5 rounded transition-all flex items-center gap-1.5 text-primary bg-white/5";
+        sideCam.className = "w-full text-left pl-6 pr-2 py-1.5 rounded transition-all flex items-center gap-1.5 text-dim-surface hover:text-white";
+      }
+    }
+
+    // Copy Firmware Code
+    function copyFirmwareCode() {
+      const camActive = !document.getElementById('codeCam').classList.contains('hidden');
+      const textToCopy = camActive ? document.getElementById('codeCam').innerText : document.getElementById('codeRover').innerText;
+      
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        const label = document.getElementById('copyCodeLabel');
+        label.innerText = 'Copied!';
+        setTimeout(() => {
+          label.innerText = 'Copy Code';
+        }, 2000);
+      });
+    }
+
+    // Drive Controller
+    function transmitDrive(dir) {
+      const stateEl = document.getElementById('roverStateDisplay');
+      if (dir === 'stop') {
+        stateEl.innerText = 'STANDBY [IDLE]';
+        stateEl.className = 'text-primary font-semibold';
+      } else {
+        stateEl.innerText = 'TRANSMITTING: ' + dir.toUpperCase();
+        stateEl.className = 'text-emerald-400 font-semibold animate-pulse';
+      }
+    }
+
+    window.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+      if (['w', 'a', 's', 'd', 'q', 'e', ' '].includes(key)) {
+        if (key === 'w') transmitDrive('forward');
+        if (key === 's') transmitDrive('reverse');
+        if (key === 'a') transmitDrive('left');
+        if (key === 'd') transmitDrive('right');
+        if (key === 'q') transmitDrive('spin_left');
+        if (key === 'e') transmitDrive('spin_right');
+        if (key === ' ') transmitDrive('stop');
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      const key = e.key.toLowerCase();
+      if (['w', 'a', 's', 'd', 'q', 'e'].includes(key)) {
+        transmitDrive('stop');
+      }
+    });
+
+    // Headlight Simulation
+    let light1 = true;
+    let light2 = true;
+    function toggleLight(index) {
+      if (index === 1) {
+        light1 = !light1;
+        document.getElementById('ledStatus1').innerText = light1 ? 'ON' : 'OFF';
+        document.getElementById('ledStatus1').className = light1 ? 'text-emerald-400' : 'text-dim-surface';
+      } else {
+        light2 = !light2;
+        document.getElementById('ledStatus2').innerText = light2 ? 'ON' : 'OFF';
+        document.getElementById('ledStatus2').className = light2 ? 'text-emerald-400' : 'text-dim-surface';
+      }
+    }
+
+    // Servo & Radar control
+    function handleServoChange(val) {
+      document.getElementById('servoLabel').innerText = val + '°';
+      document.getElementById('hudServoPanAngle').innerText = val;
+    }
+
+    function recenterPan() {
+      handleServoChange(90);
+    }
+
+    let sweepActive = true;
+    function toggleSweepMode() {
+      sweepActive = !sweepActive;
+      document.getElementById('sweepStatusText').innerText = sweepActive ? 'ON' : 'OFF';
+      document.getElementById('sweepStatusText').className = sweepActive ? 'text-white' : 'text-dim-surface';
+    }
+
+    function takeTelemetrySnapshot() {
+      const stateEl = document.getElementById('roverStateDisplay');
+      stateEl.innerText = 'BUFFER CAPTURED [JPEG]';
+      setTimeout(() => transmitDrive('stop'), 1500);
+    }
+
+    function auditGas() {
+      const gas = Math.floor(138 + Math.random() * 12);
+      document.getElementById('gasPpmValue').innerText = gas;
+    }
+
+    // Tone Synth
+    function synthesizeTone() {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioCtx();
+        const freqs = [330, 392, 440];
+        let t = ctx.currentTime;
+        freqs.forEach(f => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(f, t);
+          gain.gain.setValueAtTime(0.1, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.28);
+          t += 0.2;
+        });
+      } catch (err) {}
+    }
+
+    // Micro jitter
+    setInterval(() => {
+      const temp = (24.7 + Math.random() * 0.3).toFixed(1);
+      const fps = (29.6 + Math.random() * 0.6).toFixed(1);
+      const tempEl = document.getElementById('tempValue');
+      const fpsEl = document.getElementById('camStreamFps');
+      if (tempEl) tempEl.innerText = temp;
+      if (fpsEl) fpsEl.innerText = fps + ' FPS';
+    }, 3500);
+  </script>
+</body></html>
